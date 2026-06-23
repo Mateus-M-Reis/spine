@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true,
+  "permissions": {
+    "read": {
+      "dev/lodr/**": "deny",
+      "examples/basic_usage/assets/spineboy/spineboy.png": "deny",
+      "examples/spine_playground/assets/alien/alien.png": "deny",
+      "examples/spine_playground/assets/alien-pro/alien-pro.png": "deny",
+      "examples/spine_playground/assets/cloud-pot/cloud-pot.png": "deny",
+      "examples/spine_playground/assets/coin/coin.png": "deny",
+      "examples/spine_playground/assets/mix-and-match/mix-and-match-pro.png": "deny",
+      "examples/spine_playground/assets/powerup/powerup.png": "deny",
+      "examples/spine_playground/assets/sack/sack.png": "deny",
+      "examples/spine_playground/assets/spineboy-pro/spineboy-pro.png": "deny",
+      "examples/spine_playground/assets/spineboy_ess/spineboy.png": "deny",
+      "examples/spine_playground/assets/stretchyman/stretchyman-pro.png": "deny",
+      "examples/spine_playground/assets/tank/tank-pro.png": "deny",
+      "examples/spine_playground/assets/windmill/windmill.png": "deny",
+      "*": "allow"
+    }
+  }
+}
