@@ -1,5 +1,5 @@
--- Spine Love2D Runtime - 数学库模块
--- 提供向量、矩阵、变换等数学计算功能
+-- Spine LÖVR Runtime - Math Library Module
+-- Provides vector, matrix, and transform math utilities
 
 local math_module = {}
 
@@ -490,5 +490,34 @@ function Matrix:apply(x, y)
 end
 
 math_module.Matrix = Matrix
+
+-- Build a LOVR Mat4 from position/rotation/scale arguments.
+-- Accepts one of:
+--   buildTransform(mat4)                     -> returns the Mat4 unchanged
+--   buildTransform(x, y, z)                  -> translation only
+--   buildTransform(x, y, z, sx, sy, sz, rot) -> full transform (rot around Z)
+-- If the first argument is not a number it is assumed to already be a transform
+-- (Mat4, table with mat4-like behavior, etc.) and is returned as-is.
+function math_module.buildTransform(x, y, z, sx, sy, sz, rotation)
+  if type(x) ~= "number" then
+    return x
+  end
+
+  x = x or 0
+  y = y or 0
+  z = z or 0
+  sx = sx or 1
+  sy = sy or 1
+  sz = sz or 1
+  rotation = rotation or 0
+
+  local mat = lovr.math.newMat4()
+  mat:translate(x, y, z)
+  if rotation ~= 0 then
+    mat:rotate(rotation, 0, 0, 1)
+  end
+  mat:scale(sx, sy, sz)
+  return mat
+end
 
 return math_module

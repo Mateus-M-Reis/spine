@@ -321,8 +321,28 @@ function AtlasAttachmentLoader.new(atlas)
 	return self
 end
 
-function AtlasAttachmentLoader:newRegionAttachment(skin, name, path)
-	local region = self.atlas:findRegion(path or name)
+-- Resolves a region (or a Spine 4.2 sequence of regions) from the atlas.
+-- With a sequence, fills sequence.regions with the numbered regions and
+-- returns the setup region.
+local function resolveRegion(atlas, path, name, sequence)
+	if sequence then
+		sequence.regions = {}
+		for i = 0, sequence.count - 1 do
+			local fullPath = sequence:getPath(path or name, i)
+			sequence.regions[i + 1] = atlas:findRegion(fullPath)
+		end
+		local region = sequence.regions[sequence.setupIndex + 1] or sequence.regions[1]
+		if not region then
+			-- Fall back to the unnumbered region name.
+			region = atlas:findRegion(path or name)
+		end
+		return region
+	end
+	return atlas:findRegion(path or name)
+end
+
+function AtlasAttachmentLoader:newRegionAttachment(skin, name, path, sequence)
+	local region = resolveRegion(self.atlas, path, name, sequence)
 	if not region then
 		return nil, ("Region not found in atlas: %s"):format(path or name)
 	end
@@ -332,6 +352,7 @@ function AtlasAttachmentLoader:newRegionAttachment(skin, name, path)
 	-- Set region reference
 	attachment.region = region
 	attachment.path = path or name
+	attachment.sequence = sequence
 
 	-- Call updateRegion() to calculate offset and UVs with proper scaling
 	attachment:updateRegion()
@@ -339,25 +360,20 @@ function AtlasAttachmentLoader:newRegionAttachment(skin, name, path)
 	return attachment
 end
 
-function AtlasAttachmentLoader:newMeshAttachment(skin, name, path)
-	local region = self.atlas:findRegion(path or name)
+function AtlasAttachmentLoader:newMeshAttachment(skin, name, path, sequence)
+	local region = resolveRegion(self.atlas, path, name, sequence)
 	if not region then
 		return nil, ("Region not found in atlas: %s"):format(path or name)
 	end
 
 	local attachment = require("spine.data").MeshAttachment.new(name)
 
-	-- Set region properties
+	-- Set region properties.
 	attachment.region = region
+	attachment.sequence = sequence
 
-	-- Note: We don't set width/height here because they come from the JSON (geometry size),
-	-- not the region size. Region size is used for updateRegion.
-
-	-- IMPORTANT: We MUST store the region UVs here because createAttachment relies on them
-	-- to inverse-transform back to normalized UVs if needed.
-	-- Wait, createAttachment in data.lua uses region properties (u, v, u2, v2) to do the inverse transform.
-	-- It reads attachment.region.u, etc.
-	-- So as long as attachment.region is set, it should be fine.
+	-- Width/height come from the JSON (geometry size), not the region size;
+	-- the region's UVs are used by createAttachment/updateRegion.
 
 	return attachment
 end

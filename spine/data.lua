@@ -1,5 +1,5 @@
--- Spine Love2D Runtime - 数据加载模块
--- 负责解析和加载Spine JSON数据格式
+-- Spine LÖVR Runtime - Data Loading Module
+-- Parses and loads the Spine JSON data format
 
 local data = {}
 local utils = require("spine.utils")
@@ -618,6 +618,54 @@ function BoundingBoxAttachment.new(name)
 end
 
 -- 剪裁附件
+-- Spine 4.2 sequences: a texture region attachment split into multiple
+-- numbered atlas regions (eg "squash0", "squash1", ...). The sequence timeline
+-- picks which region is shown.
+local Sequence = {}
+Sequence.__index = Sequence
+
+function Sequence.new(count)
+  local self = setmetatable({}, Sequence)
+  self.count = count or 0
+  self.regions = {} -- AtlasRegion per index (1-based table)
+  self.start = 1
+  self.digits = 0
+  self.setupIndex = 0
+  return self
+end
+
+-- Builds the atlas region name for the given index: basePath plus
+-- (start + index) zero-padded to `digits` digits.
+function Sequence:getPath(basePath, index)
+  local frame = tostring(self.start + index)
+  local result = basePath
+  for i = self.digits - #frame, 1, -1 do
+    result = result .. "0"
+  end
+  return result .. frame
+end
+
+-- Switches the attachment's region to the current sequence index.
+function Sequence:apply(slot, attachment)
+  local index = slot.sequenceIndex
+  if index == -1 then
+    index = self.setupIndex
+  end
+  if index >= #self.regions then
+    index = #self.regions - 1
+  end
+  if index < 0 then
+    index = 0
+  end
+  local region = self.regions[index + 1]
+  if region and attachment.region ~= region then
+    attachment.region = region
+    if attachment.updateRegion then
+      attachment:updateRegion()
+    end
+  end
+end
+
 local ClippingAttachment = setmetatable({}, {__index = Attachment})
 ClippingAttachment.__index = ClippingAttachment
 
@@ -1966,6 +2014,31 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
         end
       end
 
+      -- Parse event timelines
+      if animJson.events then
+        local frameCount = #animJson.events
+        local timeline = animationModule.EventTimeline.new(frameCount)
+
+        for i, frame in ipairs(animJson.events) do
+          local time = frame.time or 0
+          local eventData = self:findEvent(frame.name)
+          local event = {
+            name = frame.name,
+            data = eventData,
+            intValue = (frame.int ~= nil) and frame.int or (eventData and eventData.intValue or 0),
+            floatValue = (frame.float ~= nil) and frame.float or (eventData and eventData.floatValue or 0),
+            stringValue = (frame.string ~= nil) and frame.string or (eventData and eventData.stringValue),
+            volume = (frame.volume ~= nil) and frame.volume or (eventData and eventData.volume or 1),
+            balance = (frame.balance ~= nil) and frame.balance or (eventData and eventData.balance or 0),
+            time = time
+          }
+          timeline:setFrame(i - 1, time, event)
+          if time > duration then duration = time end
+        end
+
+        table.insert(timelines, timeline)
+      end
+
       -- Parse slot timelines (attachment switching, color, etc.)
       if animJson.slots then
         for slotName, slotTimelines in pairs(animJson.slots) do
@@ -2110,6 +2183,38 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                     table.insert(timelines, timeline)
                   end
                 end
+
+                -- Sequence timelines (Spine 4.2)
+                if attachmentTimelines.sequence then
+                  local framesData = attachmentTimelines.sequence
+                  local frameCount = #framesData
+                  if frameCount > 0 then
+                    local skin = self.skins[skinName]
+                    local attachment = skin and skin:getAttachment(slotIndex, attachmentName)
+                    local timeline = animationModule.SequenceTimeline.new(frameCount, slotIndex, attachment)
+                    local lastDelay = 0
+                    local modeMap = {
+                      hold = 0, once = 1, loop = 2, pingpong = 3,
+                      onceReverse = 4, loopReverse = 5, pingpongReverse = 6,
+                    }
+
+                    for i, frame in ipairs(framesData) do
+                      local time = frame.time or 0
+                      local mode = modeMap[frame.mode] or 0
+                      local index = frame.index or 0
+                      local delay = frame.delay
+                      if delay == nil then
+                        delay = lastDelay
+                      end
+                      timeline:setFrame(i - 1, time, mode, index, delay)
+                      lastDelay = delay
+
+                      if time > duration then duration = time end
+                    end
+
+                    table.insert(timelines, timeline)
+                  end
+                end
               end
             end
           end
@@ -2189,14 +2294,27 @@ function SkeletonData:linkMeshes()
   self.linkedMeshes = {}
 end
 
+-- Parses an attachment's "sequence" property (Spine 4.2 sequences).
+function SkeletonData:readSequence(map)
+  if not map then
+    return nil
+  end
+  local sequence = Sequence.new(map.count or 0)
+  sequence.start = map.start or 1
+  sequence.digits = map.digits or 0
+  sequence.setupIndex = map.setup or 0
+  return sequence
+end
+
 function SkeletonData:createAttachment(attachmentMap, attachmentName, attachmentLoader, slotName)
   local attachmentType = attachmentMap.type or "region"
 
   if attachmentType == "region" then
     local path = attachmentMap.path or attachmentMap.name or attachmentName
+    local sequence = self:readSequence(attachmentMap.sequence)
     local attachment
     if attachmentLoader and attachmentLoader.newRegionAttachment then
-        attachment = attachmentLoader:newRegionAttachment(nil, attachmentName, path)
+        attachment = attachmentLoader:newRegionAttachment(nil, attachmentName, path, sequence)
     end
 
     if not attachment then
@@ -2204,6 +2322,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     end
 
     attachment.path = path
+    attachment.sequence = sequence
     attachment.x = (attachmentMap.x or 0) * self.scale
     attachment.y = (attachmentMap.y or 0) * self.scale
     attachment.rotation = attachmentMap.rotation or 0
@@ -2223,9 +2342,10 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     return attachment
   elseif attachmentType == "mesh" then
     local path = attachmentMap.path or attachmentMap.name or attachmentName
+    local sequence = self:readSequence(attachmentMap.sequence)
     local attachment
     if attachmentLoader and attachmentLoader.newMeshAttachment then
-        attachment = attachmentLoader:newMeshAttachment(nil, attachmentName, path)
+        attachment = attachmentLoader:newMeshAttachment(nil, attachmentName, path, sequence)
     end
 
     if not attachment then
@@ -2233,6 +2353,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     end
 
     attachment.path = path
+    attachment.sequence = sequence
     attachment.width = (attachmentMap.width or 0) * self.scale
     attachment.height = (attachmentMap.height or 0) * self.scale
 
@@ -2603,6 +2724,7 @@ data.MeshAttachment = MeshAttachment
 data.PathAttachment = PathAttachment
 data.BoundingBoxAttachment = BoundingBoxAttachment
 data.ClippingAttachment = ClippingAttachment
+data.Sequence = Sequence
 data.Skin = Skin
 data.EventData = EventData
 data.SkeletonData = SkeletonData

@@ -3,19 +3,38 @@
 
 local utils = {}
 
--- JSON解析器 (简化版)
+-- JSON parser (optimized: scans with string.find instead of per-character
+-- matches, which is much faster on large skeleton files).
 local function parseJson(str)
   local pos = 1
   local len = #str
 
   local function skipWhitespace()
-    while pos <= len and str:match("^%s", pos) do
-      pos = pos + 1
+    while pos <= len do
+      local b = str:byte(pos)
+      if b == 32 or b == 9 or b == 10 or b == 13 then
+        pos = pos + 1
+      else
+        break
+      end
     end
   end
 
   -- Forward declarations
   local parseValue, parseObject, parseArray, parseString, parseNumber, parseBoolean, parseNull
+
+  local function decodeEscape(escape)
+    if escape == '"' then return '"'
+    elseif escape == '\\' then return '\\'
+    elseif escape == '/' then return '/'
+    elseif escape == 'b' then return '\b'
+    elseif escape == 'f' then return '\f'
+    elseif escape == 'n' then return '\n'
+    elseif escape == 'r' then return '\r'
+    elseif escape == 't' then return '\t'
+    end
+    return escape
+  end
 
   parseValue = function()
     skipWhitespace()
@@ -25,7 +44,6 @@ local function parseJson(str)
     end
 
     local char = str:sub(pos, pos)
-    -- print("Parsing value at " .. pos .. ": " .. char)
 
     if char == '"' then
       return parseString()
@@ -33,7 +51,9 @@ local function parseJson(str)
       return parseObject()
     elseif char == '[' then
       return parseArray()
-    elseif char == 't' or char == 'f' then
+    elseif char == 't' then
+      return parseBoolean()
+    elseif char == 'f' then
       return parseBoolean()
     elseif char == 'n' then
       return parseNull()
@@ -43,63 +63,60 @@ local function parseJson(str)
   end
 
   parseString = function()
-    pos = pos + 1 -- 跳过开始引号
+    pos = pos + 1 -- skip opening quote
     local start = pos
-    local result = {}
+    local parts = nil
 
-    while pos <= len do
-      local char = str:sub(pos, pos)
-
-      if char == '"' then
-        table.insert(result, str:sub(start, pos - 1))
-        pos = pos + 1
-        return table.concat(result)
-      elseif char == '\\' then
-        table.insert(result, str:sub(start, pos - 1))
-        pos = pos + 1
-
-        if pos > len then
-          return nil
-        end
-
-        local escape = str:sub(pos, pos)
-        if escape == '"' then
-          table.insert(result, '"')
-        elseif escape == '\\' then
-          table.insert(result, '\\')
-        elseif escape == '/' then
-          table.insert(result, '/')
-        elseif escape == 'b' then
-          table.insert(result, '\b')
-        elseif escape == 'f' then
-          table.insert(result, '\f')
-        elseif escape == 'n' then
-          table.insert(result, '\n')
-        elseif escape == 'r' then
-          table.insert(result, '\r')
-        elseif escape == 't' then
-          table.insert(result, '\t')
-        else
-          table.insert(result, escape)
-        end
-
-        pos = pos + 1
-        start = pos
-      else
-        pos = pos + 1
+    while true do
+      local q = str:find('["\\]', pos)
+      if not q then
+        return nil -- unterminated string
       end
-    end
 
-    return nil -- 未闭合的字符串
+      if str:byte(q) == 34 then -- closing quote
+        if parts then
+          table.insert(parts, str:sub(start, q - 1))
+          pos = q + 1
+          return table.concat(parts)
+        end
+        pos = q + 1
+        return str:sub(start, q - 1)
+      end
+
+      -- Backslash escape
+      if not parts then
+        parts = {}
+      end
+      table.insert(parts, str:sub(start, q - 1))
+
+      local escape = str:sub(q + 1, q + 1)
+      if escape == 'u' then
+        local code = tonumber(str:sub(q + 2, q + 5), 16)
+        if code then
+          if utf8 and utf8.char then
+            table.insert(parts, utf8.char(code))
+          else
+            table.insert(parts, code < 256 and string.char(code) or "?")
+          end
+        else
+          table.insert(parts, "u")
+        end
+        pos = q + 6
+      else
+        table.insert(parts, decodeEscape(escape))
+        pos = q + 2
+      end
+      start = pos
+    end
   end
 
   parseObject = function()
-    pos = pos + 1 -- 跳过 {
+    pos = pos + 1 -- skip {
     local result = {}
 
     skipWhitespace()
 
-    if pos <= len and str:sub(pos, pos) == '}' then
+    if pos <= len and str:byte(pos) == 125 then -- '}'
       pos = pos + 1
       return result
     end
@@ -109,20 +126,20 @@ local function parseJson(str)
 
       if not key then
         -- Check for trailing comma (key is missing, but we see })
-        if str:sub(pos, pos) == '}' then
-            pos = pos + 1
-            return result
+        if str:byte(pos) == 125 then
+          pos = pos + 1
+          return result
         end
         return nil
       end
 
       skipWhitespace()
 
-      if pos > len or str:sub(pos, pos) ~= ':' then
+      if pos > len or str:byte(pos) ~= 58 then -- ':'
         return nil
       end
 
-      pos = pos + 1 -- 跳过 :
+      pos = pos + 1 -- skip :
 
       local value = parseValue()
       result[key] = value
@@ -150,12 +167,12 @@ local function parseJson(str)
   end
 
   parseArray = function()
-    pos = pos + 1 -- 跳过 [
+    pos = pos + 1 -- skip [
     local result = {}
 
     skipWhitespace()
 
-    if pos <= len and str:sub(pos, pos) == ']' then
+    if pos <= len and str:byte(pos) == 93 then -- ']'
       pos = pos + 1
       return result
     end
@@ -182,12 +199,11 @@ local function parseJson(str)
         pos = pos + 1
         skipWhitespace()
         -- Handle trailing comma
-        if str:sub(pos, pos) == ']' then
-            pos = pos + 1
-            return result
+        if str:byte(pos) == 93 then
+          pos = pos + 1
+          return result
         end
       else
-        print("DEBUG: parseArray unexpected char " .. char .. " at " .. pos)
         return nil
       end
     end
@@ -197,53 +213,58 @@ local function parseJson(str)
 
   parseNumber = function()
     local start = pos
-
-    -- 处理负号
-    if pos <= len and str:sub(pos, pos) == '-' then
+    if str:byte(pos) == 45 then -- '-'
       pos = pos + 1
     end
 
-    -- 处理整数部分
-    if pos > len or not str:match("^%d", pos) then
+    local digits = 0
+    while pos <= len do
+      local c = str:byte(pos)
+      if c >= 48 and c <= 57 then
+        digits = digits + 1
+        pos = pos + 1
+      else
+        break
+      end
+    end
+    if digits == 0 then
       return nil
     end
 
-    while pos <= len and str:match("^%d", pos) do
+    if str:byte(pos) == 46 then -- '.'
       pos = pos + 1
-    end
-
-    -- 处理小数部分
-    if pos <= len and str:sub(pos, pos) == '.' then
-      pos = pos + 1
-
-      if pos > len or not str:match("^%d", pos) then
-        return nil
-      end
-
-      while pos <= len and str:match("^%d", pos) do
-        pos = pos + 1
+      while pos <= len do
+        local c = str:byte(pos)
+        if c >= 48 and c <= 57 then
+          pos = pos + 1
+        else
+          break
+        end
       end
     end
 
-    -- 处理指数部分
-    if pos <= len and (str:sub(pos, pos) == 'e' or str:sub(pos, pos) == 'E') then
-      pos = pos + 1
-
-      if pos <= len and (str:sub(pos, pos) == '+' or str:sub(pos, pos) == '-') then
-        pos = pos + 1
+    local c = str:byte(pos)
+    if c == 101 or c == 69 then -- e / E
+      local p = pos + 1
+      local c2 = str:byte(p)
+      if c2 == 43 or c2 == 45 then -- + / -
+        p = p + 1
       end
-
-      if pos > len or not str:match("^%d", pos) then
-        return nil
-      end
-
-      while pos <= len and str:match("^%d", pos) do
-        pos = pos + 1
+      local c3 = str:byte(p)
+      if c3 and c3 >= 48 and c3 <= 57 then
+        pos = p
+        while pos <= len do
+          local c4 = str:byte(pos)
+          if c4 >= 48 and c4 <= 57 then
+            pos = pos + 1
+          else
+            break
+          end
+        end
       end
     end
 
-    local numberStr = str:sub(start, pos - 1)
-    return tonumber(numberStr)
+    return tonumber(str:sub(start, pos - 1))
   end
 
   parseBoolean = function()
@@ -274,7 +295,7 @@ local function parseJson(str)
   end
 
   if result == nil then
-      print("JSON Parse Error: parseValue returned nil at position " .. pos)
+    print("JSON Parse Error: parseValue returned nil at position " .. pos)
   end
 
   return result
@@ -697,13 +718,13 @@ function utils.triangulate(vertices)
     points[i] = {x = vertices[i*2-1], y = vertices[i*2], index = i - 1}
   end
 
-  -- Determine winding order
+  -- Determine winding order (positive shoelace area = counter-clockwise)
   local area = 0
   for i = 1, n do
     local j = (i % n) + 1
     area = area + (points[i].x * points[j].y - points[j].x * points[i].y)
   end
-  local clockwise = area > 0
+  local counterClockwise = area > 0
 
   -- Build linked list of remaining vertices
   local prev, next = {}, {}
@@ -722,9 +743,8 @@ function utils.triangulate(vertices)
     local d1 = sign(pt, p1, p2)
     local d2 = sign(pt, p2, p3)
     local d3 = sign(pt, p3, p1)
-    local hasNeg = (d1 < 0) or (d2 < 0) or (d3 < 0)
-    local hasPos = (d1 > 0) or (d2 > 0) or (d3 > 0)
-    return not (hasNeg and hasPos)
+    -- Strict interior: points exactly on an edge do not block an ear.
+    return (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
   end
 
   local function isEar(i)
@@ -733,8 +753,8 @@ function utils.triangulate(vertices)
     local c = points[next[i]]
 
     local cross = sign(a, b, c)
-    if clockwise and cross >= 0 then return false end
-    if not clockwise and cross <= 0 then return false end
+    if counterClockwise and cross <= 0 then return false end
+    if not counterClockwise and cross >= 0 then return false end
 
     -- Check if any other vertex is inside this triangle
     local k = next[next[i]]

@@ -214,6 +214,7 @@ function Slot.new(slotData, bone)
     self.attachment = nil
     self.attachmentTime = 0
     self.attachmentVertices = nil
+    self.sequenceIndex = -1 -- Spine 4.2 sequence region index (-1 = setup)
     return self
 end
 
@@ -233,6 +234,7 @@ function Slot:setToSetupPose()
         self.darkColor = nil
     end
     self.attachment = nil
+    self.sequenceIndex = -1
 end
 
 local Skeleton = {}

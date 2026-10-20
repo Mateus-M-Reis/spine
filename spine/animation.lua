@@ -1,4 +1,4 @@
--- Spine Love2D Runtime - Animation System
+-- Spine LÖVR Runtime - Animation System
 -- Handles animation playback, mixing, and timeline application
 
 local mathModule = require("spine.math")
@@ -209,6 +209,8 @@ function RotateTimeline:apply(skeleton, _lastTime, time, _events, alpha, blend, 
 
     if blend == "setup" then
         bone.rotation = bone.data.rotation + r * alpha
+    elseif blend == "add" then
+        bone.rotation = bone.rotation + r * alpha
     else
         -- r is relative to setup pose, so we must add bone.data.rotation
         local target = bone.data.rotation + r
@@ -281,6 +283,9 @@ function TranslateTimeline:apply(skeleton, lastTime, time, events, alpha, blend,
     if blend == "setup" then
         bone.x = bone.data.x + x * alpha
         bone.y = bone.data.y + y * alpha
+    elseif blend == "add" then
+        bone.x = bone.x + x * alpha
+        bone.y = bone.y + y * alpha
     else
         bone.x = bone.x + (bone.data.x + x - bone.x) * alpha
         bone.y = bone.y + (bone.data.y + y - bone.y) * alpha
@@ -357,6 +362,9 @@ function ScaleTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
         if blend == "setup" then
             bone.scaleX = bx + (x - bx) * alpha
             bone.scaleY = by + (y - by) * alpha
+        elseif blend == "add" then
+            bone.scaleX = bone.scaleX + (x - bone.data.scaleX) * alpha
+            bone.scaleY = bone.scaleY + (y - bone.data.scaleY) * alpha
         else
             bone.scaleX = bx + (x - bx) * alpha
             bone.scaleY = by + (y - by) * alpha
@@ -411,6 +419,9 @@ function ShearTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
     if blend == "setup" then
         bone.shearX = bone.data.shearX + x * alpha
         bone.shearY = bone.data.shearY + y * alpha
+    elseif blend == "add" then
+        bone.shearX = bone.shearX + x * alpha
+        bone.shearY = bone.shearY + y * alpha
     else
         bone.shearX = bone.shearX + (bone.data.shearX + x - bone.shearX) * alpha
         bone.shearY = bone.shearY + (bone.data.shearY + y - bone.shearY) * alpha
@@ -486,16 +497,28 @@ function ColorTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
     end
 
     if alpha == 1 then
-        slot.color.r = r
-        slot.color.g = g
-        slot.color.b = b
-        slot.color.a = a
+        if blend == "add" then
+            slot.color.r = slot.color.r + (r - slot.data.color.r)
+            slot.color.g = slot.color.g + (g - slot.data.color.g)
+            slot.color.b = slot.color.b + (b - slot.data.color.b)
+            slot.color.a = slot.color.a + (a - slot.data.color.a)
+        else
+            slot.color.r = r
+            slot.color.g = g
+            slot.color.b = b
+            slot.color.a = a
+        end
     else
         if blend == "setup" then
             slot.color.r = slot.data.color.r + (r - slot.data.color.r) * alpha
             slot.color.g = slot.data.color.g + (g - slot.data.color.g) * alpha
             slot.color.b = slot.data.color.b + (b - slot.data.color.b) * alpha
             slot.color.a = slot.data.color.a + (a - slot.data.color.a) * alpha
+        elseif blend == "add" then
+            slot.color.r = slot.color.r + (r - slot.data.color.r) * alpha
+            slot.color.g = slot.color.g + (g - slot.data.color.g) * alpha
+            slot.color.b = slot.color.b + (b - slot.data.color.b) * alpha
+            slot.color.a = slot.color.a + (a - slot.data.color.a) * alpha
         else
             slot.color.r = slot.color.r + (r - slot.color.r) * alpha
             slot.color.g = slot.color.g + (g - slot.color.g) * alpha
@@ -693,10 +716,17 @@ local AnimationState = {}
 AnimationState.__index = AnimationState
 
 function AnimationState.new(animationStateData)
+    -- Backward compatibility: accept a SkeletonData (which has `.animations`)
+    -- and wrap it in an AnimationStateData.
+    if animationStateData and not animationStateData.getMix and animationStateData.animations then
+        local data = require("spine.data")
+        animationStateData = data.AnimationStateData.new(animationStateData)
+    end
+
     local self = setmetatable({}, AnimationState)
     self.data = animationStateData
     self.tracks = {}
-    self.events = {}
+    self.events = {} -- events fired during the last apply() call
     self.listeners = {}
     self.queue = {}
     self.animations = {}
@@ -724,23 +754,29 @@ function AnimationState:update(delta)
         if track then
             track:update(delta)
 
-            if track.isComplete then
-                -- Handle animation completion
-                if track.listener then
-                    track.listener:complete(i)
-                end
-
-                -- Clear completed track
+            -- Completed tracks are cleared on the update after their final
+            -- apply, so the last frame of the animation still gets applied.
+            if track.isComplete and track.completeFired then
                 self.tracks[i] = nil
             end
         end
     end
 
-    -- Process queued animations
-    for _, entry in ipairs(self.queue) do
-        self:setAnimation(entry.trackIndex, entry.animation, entry.loop)
+    -- Process queued animations, honoring their delay.
+    if #self.queue > 0 then
+        local remaining = {}
+        for _, entry in ipairs(self.queue) do
+            if entry.delay then
+                entry.delay = entry.delay - delta
+            end
+            if not entry.delay or entry.delay <= 0 then
+                self:setAnimation(entry.trackIndex, entry.animation, entry.loop)
+            else
+                table.insert(remaining, entry)
+            end
+        end
+        self.queue = remaining
     end
-    self.queue = {}
 end
 
 function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
@@ -750,8 +786,10 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
     local animation = animationNameOrObject
     if type(animationNameOrObject) == "string" then
         -- Look up animation by name from skeleton data
-        if self.data and self.data.skeletonData and self.data.skeletonData.animations then
-            animation = self.data.skeletonData.animations[animationNameOrObject]
+        local animations = self.data and
+            (self.data.skeletonData and self.data.skeletonData.animations or self.data.animations)
+        if animations then
+            animation = animations[animationNameOrObject]
             if not animation then
                 print("Warning: Animation not found: " .. animationNameOrObject)
                 return
@@ -762,10 +800,20 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
         end
     end
 
-    -- Calculate mix duration if we have animation state data and previous animation
+    -- Snapshot the previous animation so we can crossfade from it, and
+    -- calculate the mix duration.
     local mixDuration = 0
-    if track and track.animation and self.data and animation then
+    local previous = nil
+    if track and track.animation and track.animation ~= animation and self.data and self.data.getMix then
         mixDuration = self.data:getMix(track.animation.name, animation.name)
+        previous = {
+            animation = track.animation,
+            loop = track.loop,
+            time = track.time,
+            lastTime = track.lastTime,
+            alpha = track.alpha or 1,
+            mixBlend = track.mixBlend or "first",
+        }
     end
 
     -- Fire start event
@@ -779,7 +827,10 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
             lastTime = 0,
             isComplete = false,
             mixDuration = mixDuration,
-            mixTime = 0
+            mixTime = 0,
+            previous = previous,
+            alpha = 1, -- track weight; lower to fade the track out
+            mixBlend = "first", -- "setup", "first", "replace", or "add"
         }
         self.tracks[trackIndex] = track
     else
@@ -790,24 +841,52 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
         track.isComplete = false
         track.mixDuration = mixDuration
         track.mixTime = 0
+        track.previous = previous
     end
 
     -- Update track function
     track.update = function(self, delta)
         self.time = self.time + delta
-        -- print("Track time: " .. t.time)
-        if not self.loop and self.time >= self.animation.duration then
+
+        -- Advance the crossfade if one is in progress.
+        if self.previous then
+            self.previous.time = self.previous.time + delta
+            self.mixTime = self.mixTime + delta
+            if not self.mixDuration or self.mixDuration <= 0 or self.mixTime >= self.mixDuration then
+                self.previous = nil
+            end
+        end
+
+        if not self.loop and self.animation.duration > 0 and self.time >= self.animation.duration then
             self.isComplete = true
             self.time = self.animation.duration
         end
     end
-        track.setTrackTime = function(self, t)
+    track.setTrackTime = function(self, t)
         self.time = t or self.time
     end
     track.setTrackEnd = function(self, t)
         self.trackEnd = t
     end
     return track
+end
+
+-- Sets the weight of a track (0-1). Tracks with lower alpha fade out.
+-- Also accessible as track.alpha directly.
+function AnimationState:setTrackAlpha(trackIndex, alpha)
+    local track = self.tracks[trackIndex]
+    if track then
+        track.alpha = alpha
+    end
+end
+
+-- Sets how a track blends on top of lower tracks: "setup", "first",
+-- "replace", or "add". Also accessible as track.mixBlend directly.
+function AnimationState:setTrackMixBlend(trackIndex, blend)
+    local track = self.tracks[trackIndex]
+    if track then
+        track.mixBlend = blend
+    end
 end
 
 function AnimationState:addAnimation(trackIndex, animation, loop, delay)
@@ -821,12 +900,56 @@ function AnimationState:addAnimation(trackIndex, animation, loop, delay)
 end
 
 function AnimationState:apply(skeleton)
-    for _, track in pairs(self.tracks) do
+    -- Apply tracks in deterministic order (lowest track index first).
+    local ordered = {}
+    for i, track in pairs(self.tracks) do
         if track and track.animation then
-            -- Use 'first' blend mode which will apply setup for constraints before animation data
-            track.animation:apply(skeleton, track.lastTime, track.time, track.loop, self.events, 1, "first", 1)
-            track.lastTime = track.time
+            track.trackIndex = i
+            table.insert(ordered, track)
         end
+    end
+    table.sort(ordered, function(a, b) return a.trackIndex < b.trackIndex end)
+
+    -- Events from this apply call, for polling and listener dispatch.
+    self.events = {}
+
+    for _, track in ipairs(ordered) do
+        -- If a crossfade is in progress, first apply the previous animation
+        -- at full weight so the current one blends on top of it.
+        if track.previous then
+            local prev = track.previous
+            prev.animation:apply(skeleton, prev.lastTime, prev.time, prev.loop, nil, prev.alpha or 1, prev.mixBlend or "first", 1)
+            prev.lastTime = prev.time
+        end
+
+        -- Weight of the current animation: track alpha, ramping up during a mix.
+        local trackAlpha = track.alpha or 1
+        local alpha = trackAlpha
+        if track.mixDuration and track.mixDuration > 0 and track.mixTime < track.mixDuration then
+            alpha = alpha * (track.mixTime / track.mixDuration)
+        end
+
+        local blend = track.mixBlend or "first"
+        local trackEvents = {}
+        track.animation:apply(skeleton, track.lastTime, track.time, track.loop, trackEvents, alpha, blend, 1)
+        track.lastTime = track.time
+
+        for _, event in ipairs(trackEvents) do
+            event.trackIndex = track.trackIndex
+            table.insert(self.events, event)
+        end
+
+        -- Fire completion events once, after the final frame has been applied.
+        if track.isComplete and not track.completeFired then
+            track.completeFired = true
+            self:fireEvent("complete", track.trackIndex)
+            self:fireEvent("end", track.trackIndex)
+        end
+    end
+
+    -- Dispatch events to listeners.
+    for _, event in ipairs(self.events) do
+        self:fireEvent("event", event.trackIndex, event)
     end
 end
 
@@ -854,9 +977,10 @@ function EventTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
 
     local frames = self.frames
     local frameCount = #frames
+    if frameCount == 0 then return end
 
     if lastTime > time then -- Fire events after jump
-        self:apply(skeleton, lastTime, 999999, events, alpha, blend, direction)
+        self:apply(skeleton, lastTime, math.huge, events, alpha, blend, direction)
         lastTime = -1
     elseif lastTime >= frames[frameCount] then -- Last time is after last frame
         return
@@ -864,16 +988,13 @@ function EventTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
 
     if time < frames[1] then return end -- Time is before first frame
 
-    local i = 0
+    -- Fire each event exactly once: start at the first frame strictly after
+    -- lastTime (events at frames <= lastTime were already fired).
+    local i
     if lastTime < frames[1] then
         i = 1
     else
-        i = mathModule.binarySearch(frames, lastTime, 1)
-        local frame = frames[i]
-        while i > 1 do -- Fire multiple events with the same time
-            if frames[i - 1] ~= frame then break end
-            i = i - 1
-        end
+        i = mathModule.binarySearch(frames, lastTime, 1) + 1
     end
 
     while i <= frameCount and time >= frames[i] do
@@ -882,6 +1003,120 @@ function EventTimeline:apply(skeleton, lastTime, time, events, alpha, blend, dir
     end
 end
 
+
+-- Spine 4.2 sequence timeline: picks which region of a Sequence attachment
+-- is shown. Frame layout per entry: time, mode | (index << 4), delay.
+local SequenceTimeline = {}
+SequenceTimeline.__index = SequenceTimeline
+setmetatable(SequenceTimeline, { __index = Timeline })
+
+local SequenceMode = {
+    hold = 0, once = 1, loop = 2, pingpong = 3,
+    onceReverse = 4, loopReverse = 5, pingpongReverse = 6,
+}
+
+function SequenceTimeline.new(frameCount, slotIndex, attachment)
+    local self = setmetatable(Timeline.new(frameCount * 3), SequenceTimeline)
+    self.slotIndex = slotIndex
+    self.attachment = attachment
+    return self
+end
+
+function SequenceTimeline:getFrameEntries()
+    return 3
+end
+
+function SequenceTimeline:setFrame(frameIndex, time, mode, index, delay)
+    local i = frameIndex * 3 + 1
+    self.frames[i] = time
+    self.frames[i + 1] = (mode or 0) + (index or 0) * 16
+    self.frames[i + 2] = delay or 0
+end
+
+function SequenceTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
+    local slot = skeleton.slots[self.slotIndex]
+    if not slot then return end
+
+    local attachment = self.attachment
+    if not attachment then return end
+
+    local slotAttachment = slot.attachment
+    if slotAttachment ~= attachment then
+        -- Allow when the current attachment is a linked mesh inheriting from
+        -- the timeline attachment (or vice versa).
+        if not slotAttachment or not
+            (slotAttachment.parentMesh == attachment or attachment.parentMesh == slotAttachment) then
+            return
+        end
+    end
+
+    if direction == "out" then
+        if blend == "setup" then
+            slot.sequenceIndex = -1
+        end
+        return
+    end
+
+    local frames = self.frames
+    if #frames == 0 then return end
+
+    if time < frames[1] then
+        if blend == "setup" or blend == "first" then
+            slot.sequenceIndex = -1
+        end
+        return
+    end
+
+    local i
+    if time >= frames[#frames - 2] then
+        i = #frames - 2
+    else
+        i = mathModule.binarySearch(frames, time, 3)
+    end
+    if i < 1 then
+        i = 1
+    end
+
+    local before = frames[i]
+    local modeAndIndex = frames[i + 1] or 0
+    local delay = frames[i + 2] or 0
+
+    local sequence = attachment.sequence
+    if not sequence then return end
+
+    local index = math.floor(modeAndIndex / 16)
+    local count = #sequence.regions
+    local mode = modeAndIndex % 16
+
+    if mode ~= SequenceMode.hold and delay > 0 and time > before and count > 0 then
+        index = index + math.floor((time - before) / delay + 0.00001)
+
+        if mode == SequenceMode.once then
+            index = math.min(count - 1, index)
+        elseif mode == SequenceMode.loop then
+            index = index % count
+        elseif mode == SequenceMode.pingpong then
+            local n = count * 2 - 2
+            index = (n == 0) and 0 or (index % n)
+            if index >= count then
+                index = n - index
+            end
+        elseif mode == SequenceMode.onceReverse then
+            index = math.max(count - 1 - index, 0)
+        elseif mode == SequenceMode.loopReverse then
+            index = count - 1 - (index % count)
+        elseif mode == SequenceMode.pingpongReverse then
+            local n = count * 2 - 2
+            index = (n == 0) and 0 or ((index + count - 1) % n)
+            if index >= count then
+                index = n - index
+            end
+        end
+    end
+
+    slot.sequenceIndex = index
+    sequence:apply(slot, attachment)
+end
 
 local DrawOrderTimeline = {}
 DrawOrderTimeline.__index = DrawOrderTimeline
@@ -930,22 +1165,10 @@ function DrawOrderTimeline:apply(skeleton, lastTime, time, events, alpha, blend,
     local drawOrder = skeleton.drawOrder
     local slots = skeleton.slots
 
-    -- Copy slots to drawOrder based on offsets
-    -- This is complex. Spine runtime usually does:
-    -- 1. Copy slots to drawOrder
-    -- 2. Apply offsets
-
-    -- But here we have pre-calculated drawOrder?
-    -- No, setFrame receives `drawOrder` which is likely a list of offsets.
-
-    -- Actually, let's look at how data.lua parses it.
-    -- It passes `drawOrder` which is `animJson.drawOrder[i].offsets`.
-
-    -- So `drawOrderToSetupIndex` is the offsets array.
-
+    -- Reset draw order to setup order, then apply the frame's offsets
+    -- (each offset moves a slot by `amount` positions relative to setup).
     local offsets = drawOrderToSetupIndex
 
-    -- Reset draw order first
     for i, slot in ipairs(slots) do
         drawOrder[i] = slot
     end
@@ -1868,6 +2091,7 @@ local animationModule = {
     AttachmentTimeline = AttachmentTimeline,
     EventTimeline = EventTimeline,
     DrawOrderTimeline = DrawOrderTimeline,
+    SequenceTimeline = SequenceTimeline,
     IkConstraintTimeline = IkConstraintTimeline,
     TransformConstraintTimeline = TransformConstraintTimeline,
     PathConstraintTimeline = PathConstraintTimeline,

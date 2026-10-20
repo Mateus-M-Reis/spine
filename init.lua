@@ -1,10 +1,10 @@
 -- Spine LÖVR Runtime - Main Entry Point
--- Version: 1.0.0
+-- Version: 1.2.1
 
 local spine = {}
 
 -- Version information
-spine.version = "1.0.0"
+spine.version = "1.2.1"
 spine.spineVersion = "4.2.x"
 spine.lovrVersion = "0.18+"
 
@@ -73,7 +73,34 @@ function spine.init()
   return true
 end
 
--- Load Spine data files
+-- Cache of shared SkeletonData/Atlas resources, so loading the same asset
+-- many times reuses textures and parsed data (each loadSkeleton call still
+-- returns its own Skeleton/renderer instance).
+local assetCache = {}
+
+local function assetCacheKey(jsonFile, atlasFile, scale)
+  local jsonKey = type(jsonFile) == "string" and jsonFile or tostring(jsonFile)
+  local atlasKey = type(atlasFile) == "string" and atlasFile
+    or (type(atlasFile) == "table" and tostring(atlasFile))
+    or tostring(atlasFile)
+  return jsonKey .. "|" .. atlasKey .. "|" .. tostring(scale)
+end
+
+-- Releases all cached skeleton data and atlas textures.
+function spine.clearAssetCache()
+  for _, entry in pairs(assetCache) do
+    if entry.atlas and entry.atlas.dispose then
+      pcall(entry.atlas.dispose, entry.atlas)
+    end
+  end
+  assetCache = {}
+end
+
+-- Load Spine data files.
+-- Accepts jsonFile as a path or a decoded table, atlasFile as a path, raw atlas
+-- text, or an already-built Atlas object. Returns an instance table with
+-- skeleton, skeletonData, animationState, animationStateData, renderer, and atlas.
+-- SkeletonData and atlas textures are cached and shared between instances.
 function spine.loadSkeleton(jsonFile, atlasFile, scale)
   scale = scale or 1
 
@@ -92,44 +119,79 @@ function spine.loadSkeleton(jsonFile, atlasFile, scale)
     error("Invalid JSON data")
   end
 
+  -- Reuse cached skeleton data and atlas when available.
+  local cacheKey = assetCacheKey(jsonFile, atlasFile, scale)
+  local cached = assetCache[cacheKey]
+
   local atlas
-  if atlasFile then
-    local atlasData
-    if type(atlasFile) == "string" then
-      atlasData = lovr.filesystem.read(atlasFile)
-      if not atlasData then
-        error(string.format("Failed to read atlas file: %s", atlasFile))
+  local attachmentLoader
+  local skeletonData
+
+  if cached then
+    atlas = cached.atlas
+    skeletonData = cached.skeletonData
+  else
+    -- Load the atlas (if any) and build an attachment loader so attachments
+    -- get their textures/regions. Without this the skeleton would have no
+    -- renderable regions.
+    if atlasFile then
+      local atlasData
+      local imageRoot
+      if type(atlasFile) == "string" then
+        atlasData = lovr.filesystem.read(atlasFile)
+        if not atlasData then
+          error(string.format("Failed to read atlas file: %s", atlasFile))
+        end
+        imageRoot = atlasFile:match("^(.*)/[^/]+$") or ""
+      elseif type(atlasFile) == "table" and atlasFile.loadAtlasFile then
+        atlas = atlasFile -- already-built Atlas object
+      else
+        atlasData = atlasFile -- raw atlas text
       end
-    else
-      atlasData = atlasFile
+
+      if atlasData then
+        atlas = spine.TextureAtlas.new()
+        local ok, err = atlas:loadAtlasFile(atlasData, imageRoot)
+        if not ok then
+          error(string.format("Failed to load atlas: %s", err or "unknown error"))
+        end
+      end
+
+      if atlas then
+        attachmentLoader = spine.atlas.AtlasAttachmentLoader.new(atlas)
+      end
     end
-    atlas = spine.TextureAtlas.new()
-    local imageRoot = nil
-    if type(atlasFile) == "string" then
-      imageRoot = atlasFile:match("^(.*)/[^/]+$") or ""
-    end
-    local ok, err = atlas:loadAtlasFile(atlasData, imageRoot)
-    if not ok then
-      error(string.format("Failed to load atlas: %s", err or "unknown error"))
-    end
+
+    skeletonData = spine.data.SkeletonData.new(nil, scale)
+    skeletonData:loadFromJson(jsonData, attachmentLoader)
+
+    assetCache[cacheKey] = { atlas = atlas, skeletonData = skeletonData }
   end
 
-  local skeletonData = spine.data.SkeletonData.new(jsonData, scale)
   local skeleton = spine.skeleton.Skeleton.new(skeletonData)
+  skeleton:setToSetupPose()
+  skeleton:updateWorldTransform()
+
+  if atlas and not attachmentLoader then
+    attachmentLoader = spine.atlas.AtlasAttachmentLoader.new(atlas)
+  end
+
   local renderer = spine.Renderer.new()
 
-  local animationState = nil
+  local animationState, animationStateData = nil, nil
   if jsonData.animations and next(jsonData.animations) then
-    local AnimationState = spine.animation.AnimationState
-    animationState = AnimationState.new(skeletonData)
+    animationStateData = spine.data.AnimationStateData.new(skeletonData)
+    animationState = spine.animation.AnimationState.new(animationStateData)
   end
 
   return {
     skeleton = skeleton,
     animationState = animationState,
+    animationStateData = animationStateData,
     renderer = renderer,
     skeletonData = skeletonData,
-    atlas = atlas
+    atlas = atlas,
+    attachmentLoader = attachmentLoader
   }
 end
 
@@ -141,33 +203,19 @@ function spine.update(instance, deltaTime)
     instance.animationState:update(deltaTime)
     instance.animationState:apply(instance.skeleton)
   end
-
-  instance.skeleton:updateWorldTransform()
-
   spine.performance.animationUpdateTime = lovr.timer.getTime() - startTime
+
+  -- Advance skeleton time so physics constraints and attachment timing work.
+  startTime = lovr.timer.getTime()
+  instance.skeleton:update(deltaTime)
+  instance.skeleton:updateWorldTransform()
+  spine.performance.skeletonUpdateTime = lovr.timer.getTime() - startTime
 end
 
--- Create a Mat4 transform from position, rotation, and scale parameters
--- Accepts: (x, y, z, sx, sy, sz, rotation) or a Mat4 or nil
-local function buildTransform(x, y, z, sx, sy, sz, rotation)
-  if type(x) == "userdata" then
-    return x -- it's a Mat4
-  end
-
-  x = x or 0
-  y = y or 0
-  z = z or 0
-  sx = sx or 1
-  sy = sy or -1
-  sz = sz or 1
-  rotation = rotation or 0
-
-  local mat = lovr.math.newMat4()
-  mat:translate(x, y, z)
-  mat:rotate(rotation, 0, 0, 1)
-  mat:scale(sx, sy, sz)
-  return mat
-end
+-- Build a Mat4 transform from position, rotation, and scale parameters.
+-- Accepts: (x, y, z, sx, sy, sz, rotation) or a Mat4 or nil.
+spine.buildTransform = spine.math.buildTransform
+local buildTransform = spine.buildTransform
 
 -- Render Spine instance
 -- Usage: spine.draw(instance, pass, x, y, z, scaleX, scaleY, scaleZ, rotation)
@@ -183,6 +231,11 @@ function spine.draw(instance, pass, ...)
 
   instance.renderer.debug = spine.debug
   instance.renderer:drawSkeleton(instance.skeleton, pass, transform)
+
+  -- Copy per-frame renderer counters into the global performance table.
+  spine.performance.drawCalls = instance.renderer.drawCalls or 0
+  spine.performance.vertexCount = instance.renderer.vertexCount or 0
+  spine.performance.triangleCount = instance.renderer.triangleCount or 0
 
   spine.performance.renderTime = lovr.timer.getTime() - startTime
 end

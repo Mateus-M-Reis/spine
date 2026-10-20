@@ -1,4 +1,4 @@
--- Spine Love2D Runtime - Constraint System
+-- Spine LÖVR Runtime - Constraint System
 -- Implements IK, transform, and path constraints for bone manipulation
 
 local mathModule = require("spine.math")
@@ -1097,14 +1097,6 @@ function PhysicsConstraint:update(physics)
         self.rotateVelocity = 0
         self.scaleOffset = 0
         self.scaleVelocity = 0
-        local n = self.data.name or ""
-        if string.find(n, "rain") then
-            bone.x = bone.data.x
-            bone.y = bone.data.y
-            bone:updateWorldTransform()
-            self.ux = bone.worldX
-            self.uy = bone.worldY
-        end
         -- fallthrough
     end
     

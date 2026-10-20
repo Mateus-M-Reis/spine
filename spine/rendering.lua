@@ -8,14 +8,164 @@ local VERTEX_FORMAT = {
 	{ "VertexPosition", "vec3" },
 	{ "VertexUV", "vec2" },
 	{ "VertexColor", "vec4" },
+	{ "VertexDarkColor", "vec4" }, -- used by the tint-black shader (0,0,0,0 when absent)
 }
 
 local function isValidNumber(n)
 	return n == n and n ~= math.huge and n ~= -math.huge
 end
 
+-- Compatibility helpers: LÖVR 0.18 uses polygon(mode, vertices) and
+-- box(mode, ...); some builds use polygon(vertices)/box(...) with no mode
+-- string. Try the mode variant first, then fall back.
+local function passPolygon(pass, mode, verts)
+	local ok = pcall(pass.polygon, pass, mode, verts)
+	if ok then return end
+	ok = pcall(pass.polygon, pass, verts)
+	if ok then return end
+	pcall(pass.polygon, pass, unpack(verts))
+end
+
+local function passPolygonFlat(pass, mode, ...)
+	local verts = { ... }
+	local ok = pcall(pass.polygon, pass, mode, verts)
+	if ok then return end
+	ok = pcall(pass.polygon, pass, verts)
+	if ok then return end
+	pcall(pass.polygon, pass, unpack(verts))
+end
+
+local function passBox(pass, mode, x, y, z, sx, sy, sz)
+	local ok = pcall(pass.box, pass, mode, x, y, z, sx, sy, sz)
+	if ok then return end
+	pcall(pass.box, pass, x, y, z, sx, sy, sz)
+end
+
 local Renderer = {}
 Renderer.__index = Renderer
+
+-- Fill a clipping attachment's polygon into the stencil buffer.
+-- writeMode is "increment" (mark region) or "decrement" (unmark region).
+-- Color writes are disabled while drawing the stencil polygon.
+-- Returns false if the polygon could not be computed/triangulated.
+function Renderer:stencilPolygon(slot, clipping, pass, writeMode)
+	local worldVertices = {}
+	clipping:computeWorldVertices(slot, worldVertices)
+
+	if #worldVertices < 6 then
+		return false
+	end
+
+	for i = 1, #worldVertices do
+		if not isValidNumber(worldVertices[i]) then
+			return false
+		end
+	end
+
+	local triIndices = utilsModule.triangulate(worldVertices)
+	if #triIndices < 3 then
+		return false
+	end
+
+	local ok = pcall(pass.setStencilWrite, pass, writeMode, 1)
+	if not ok then
+		return false
+	end
+
+	local colorWriteOff = pcall(pass.setColorWrite, pass, false, false, false, false)
+	pass:setColor(1, 1, 1)
+
+	for j = 1, #triIndices, 3 do
+		local poly = {
+			worldVertices[triIndices[j] * 2 + 1],
+			worldVertices[triIndices[j] * 2 + 2],
+			0,
+			worldVertices[triIndices[j + 1] * 2 + 1],
+			worldVertices[triIndices[j + 1] * 2 + 2],
+			0,
+			worldVertices[triIndices[j + 2] * 2 + 1],
+			worldVertices[triIndices[j + 2] * 2 + 2],
+			0,
+		}
+		passPolygon(pass, "fill", poly)
+	end
+
+	if colorWriteOff then
+		pcall(pass.setColorWrite, pass, true, true, true, true)
+	end
+	pcall(pass.setStencilWrite, pass)
+
+	return true
+end
+
+-- Draws drawOrder[startIndex..endIndex] with clipping support.
+-- clipDepth is the number of enclosing clips (equals the stencil value of the
+-- surrounding region). Clipping attachments mark their polygon with an
+-- incrementing stencil write, draw their range against `equal (depth + 1)`,
+-- then decrement the polygon back so enclosing clips are unaffected.
+-- Nested clips work because each level uses a distinct stencil value.
+function Renderer:drawDrawOrderRange(skeleton, pass, drawOrder, startIndex, endIndex, clipDepth)
+	local batch = { groups = {}, order = {} }
+	local i = startIndex
+	while i <= endIndex do
+		local slot = drawOrder[i]
+		local attachment = slot.attachment
+
+		if attachment and attachment.type == "clipping" and self.hasStencil ~= false then
+			local clipping = attachment
+			local clipEnd = endIndex
+			local endName = clipping.endSlot
+			if endName then
+				for j = i + 1, endIndex do
+					if drawOrder[j].data.name == endName then
+						clipEnd = j
+						break
+					end
+				end
+			end
+
+			-- Detect stencil support once per renderer ("keep" is a no-op write
+			-- mode, so the probe leaves the stencil buffer untouched).
+			if self.stencilOk == nil then
+				self.stencilOk = pcall(pass.setStencilWrite, pass, "keep", 0)
+				if not self.stencilOk then
+					self.hasStencil = false
+				end
+			end
+
+			local innerDepth = clipDepth + 1
+			if self.stencilOk then
+				if self:stencilPolygon(slot, clipping, pass, "increment") then
+					local testOk = pcall(pass.setStencilTest, pass, "equal", innerDepth)
+					if testOk then
+						self:drawDrawOrderRange(skeleton, pass, drawOrder, i + 1, clipEnd, innerDepth)
+						pcall(pass.setStencilTest, pass)
+					else
+						-- Stencil test unsupported: draw the range unclipped.
+						self:drawDrawOrderRange(skeleton, pass, drawOrder, i + 1, clipEnd, clipDepth)
+					end
+					-- Restore the stencil buffer.
+					self:stencilPolygon(slot, clipping, pass, "decrement")
+				else
+					-- Polygon unavailable: draw the range unclipped.
+					self:drawDrawOrderRange(skeleton, pass, drawOrder, i + 1, clipEnd, clipDepth)
+				end
+			else
+				-- Stencil writing unsupported: draw the range unclipped.
+				self:drawDrawOrderRange(skeleton, pass, drawOrder, i + 1, clipEnd, clipDepth)
+			end
+
+		-- Skip the whole clipped range; the outer loop must not redraw it.
+			i = clipEnd
+		elseif attachment then
+			self:collectAttachment(batch, slot, attachment)
+		end
+
+		i = i + 1
+	end
+
+	self:flushBatches(batch, pass)
+end
 
 function Renderer:drawSkeleton(skeleton, pass, transform)
 	pass:push()
@@ -23,44 +173,15 @@ function Renderer:drawSkeleton(skeleton, pass, transform)
 		pass:transform(transform)
 	end
 
-	local drawOrder = skeleton.drawOrder
+	self.drawCalls = 0
+	self.vertexCount = 0
+	self.triangleCount = 0
 
-	for i, slot in ipairs(drawOrder) do
-		local attachment = slot.attachment
-		if attachment then
-			if attachment.type == "clipping" and self.hasStencil ~= false then
-				local clipping = attachment
-				local endSlot = clipping.endSlot
-
-				local ok = pcall(pass.setStencilWrite, pass, "replace", 1)
-				if not ok then
-					self.hasStencil = false
-				else
-					self:drawClipping(slot, clipping, pass)
-					pcall(pass.setStencilTest, pass, "equal", 1)
-
-					for j = i + 1, #drawOrder do
-						local innerSlot = drawOrder[j]
-						if innerSlot.attachment and innerSlot.attachment.type ~= "clipping" then
-							self:drawAttachment(innerSlot, innerSlot.attachment, pass)
-						end
-						if innerSlot.data.name == endSlot then
-							break
-						end
-					end
-
-					pcall(pass.setStencilTest, pass)
-					pcall(pass.setStencilWrite, pass)
-				end
-			else
-				self:drawAttachment(slot, attachment, pass)
-			end
-		end
-	end
+	self:drawDrawOrderRange(skeleton, pass, skeleton.drawOrder, 1, #skeleton.drawOrder, 0)
 
 	if self.debug then
 		self:drawDebugSkeleton(skeleton, pass)
-		for _, slot in ipairs(drawOrder) do
+		for _, slot in ipairs(skeleton.drawOrder) do
 			if slot.attachment and slot.attachment.type == "clipping" then
 				local worldVertices = {}
 				slot.attachment:computeWorldVertices(slot, worldVertices)
@@ -72,7 +193,7 @@ function Renderer:drawSkeleton(skeleton, pass, transform)
 						table.insert(poly3d, worldVertices[j + 1])
 						table.insert(poly3d, 0)
 					end
-					pass:polygon("line", poly3d)
+					passPolygon(pass, "line", poly3d)
 				end
 			end
 		end
@@ -81,56 +202,81 @@ function Renderer:drawSkeleton(skeleton, pass, transform)
 	pass:pop()
 end
 
-function Renderer:drawClipping(slot, clipping, pass)
-	local worldVertices = {}
-	clipping:computeWorldVertices(slot, worldVertices)
+local REGION_INDICES = { 1, 2, 3, 1, 3, 4 }
 
-	if #worldVertices >= 6 then
-		local valid = true
-		for i = 1, #worldVertices do
-			if not isValidNumber(worldVertices[i]) then
-				valid = false
-				break
+-- Get or create a cached Material for a texture. Materials are cached per
+-- texture (weak keys) so they are not reallocated every frame per attachment.
+-- LÖVR 0.11 creates materials with newMaterial(texture), newer versions with
+-- newMaterial({ texture = ... }); the working style is detected once.
+function Renderer:getMaterial(texture)
+	if not self.materials then
+		self.materials = setmetatable({}, { __mode = "k" })
+	end
+	local material = self.materials[texture]
+	if not material then
+		if self.materialStyle == nil then
+			local ok, candidate = pcall(lovr.graphics.newMaterial, { texture = texture })
+			if ok then
+				self.materialStyle = "options"
+				material = candidate
+			else
+				local ok2, candidate2 = pcall(lovr.graphics.newMaterial, texture)
+				if ok2 then
+					self.materialStyle = "texture"
+					material = candidate2
+				end
+			end
+		elseif self.materialStyle == "options" then
+			local ok, candidate = pcall(lovr.graphics.newMaterial, { texture = texture })
+			if ok then
+				material = candidate
+			end
+		else
+			local ok, candidate = pcall(lovr.graphics.newMaterial, texture)
+			if ok then
+				material = candidate
 			end
 		end
 
-		if valid then
-			local triIndices = utilsModule.triangulate(worldVertices)
-			pass:setColor(1, 1, 1)
-			if #triIndices >= 3 then
-				for j = 1, #triIndices, 3 do
-					local poly = {
-						worldVertices[triIndices[j] * 2 + 1],
-						worldVertices[triIndices[j] * 2 + 2],
-						0,
-						worldVertices[triIndices[j + 1] * 2 + 1],
-						worldVertices[triIndices[j + 1] * 2 + 2],
-						0,
-						worldVertices[triIndices[j + 2] * 2 + 1],
-						worldVertices[triIndices[j + 2] * 2 + 2],
-						0,
-					}
-					pass:polygon("fill", poly)
-				end
-			else
-				local poly3d = {}
-				for j = 1, #worldVertices, 2 do
-					table.insert(poly3d, worldVertices[j])
-					table.insert(poly3d, worldVertices[j + 1])
-					table.insert(poly3d, 0)
-				end
-				pass:polygon("fill", poly3d)
-			end
+		if material then
+			self.materials[texture] = material
 		end
 	end
+	return material
 end
 
-function Renderer:drawAttachment(slot, attachment, pass)
-	local color = slot.color
-	local pma = false
-	if attachment.region and attachment.region.page and attachment.region.page.pma then
-		pma = true
+-- Get (or create) a growable Buffer/Mesh pair for a texture page. Batches for
+-- the same texture reuse the buffer across frames and instances of the
+-- renderer; it is recreated only when the batch outgrows it.
+function Renderer:getBatchMesh(texture, vertexCount)
+	if not self.batchMeshes then
+		self.batchMeshes = setmetatable({}, { __mode = "k" })
 	end
+	local info = self.batchMeshes[texture]
+	if not info then
+		info = { capacity = 0 }
+		self.batchMeshes[texture] = info
+	end
+	if info.capacity < vertexCount then
+		local capacity = math.max(vertexCount, info.capacity * 2, 256)
+		info.buffer = lovr.graphics.newBuffer(VERTEX_FORMAT, capacity)
+		info.mesh = lovr.graphics.newMesh(info.buffer)
+		info.capacity = capacity
+	end
+	return info
+end
+
+-- Collects one attachment's vertices into the batch, grouped by texture page
+-- and render state (blend mode, premultiplication, tint). Nothing is drawn yet;
+-- flushBatches draws one mesh per group.
+function Renderer:collectAttachment(batch, slot, attachment)
+	local region = attachment.region
+	if not region or not region.texture then
+		return
+	end
+
+	local color = slot.color
+	local pma = not not (region.page and region.page.pma)
 
 	local r, g, b, a
 	if pma then
@@ -139,40 +285,14 @@ function Renderer:drawAttachment(slot, attachment, pass)
 		r, g, b, a = color.r, color.g, color.b, color.a
 	end
 
-	local atype = attachment.type
-	if atype == "region" then
-		self:drawRegionAttachment(slot, attachment, pass, r, g, b, a)
-	elseif atype == "mesh" then
-		self:drawMeshAttachment(slot, attachment, pass, r, g, b, a)
-	end
-end
-
-function Renderer:makeSlotMesh(slot, vertexCount)
-	if slot._lovrMesh then
-		slot._lovrBuffer = slot._lovrMesh:getVertexBuffer()
-		return slot._lovrMesh
-	end
-
-	local buffer = lovr.graphics.newBuffer(VERTEX_FORMAT, vertexCount)
-	local mesh = lovr.graphics.newMesh(buffer)
-	slot._lovrMesh = mesh
-	slot._lovrBuffer = buffer
-	return mesh
-end
-
-function Renderer:drawRegionAttachment(slot, attachment, pass, r, g, b, a)
-	local region = attachment.region
-	if not region then
-		return
-	end
-
-	local texture = region.texture
-	if not texture then
-		return
-	end
-
 	local worldVertices = {}
-	attachment:computeWorldVertices(slot.bone, worldVertices)
+	if attachment.type == "region" then
+		attachment:computeWorldVertices(slot.bone, worldVertices)
+	elseif attachment.type == "mesh" then
+		attachment:computeWorldVertices(slot, worldVertices)
+	else
+		return
+	end
 
 	for i = 1, #worldVertices do
 		if not isValidNumber(worldVertices[i]) then
@@ -180,150 +300,152 @@ function Renderer:drawRegionAttachment(slot, attachment, pass, r, g, b, a)
 		end
 	end
 
-    -- Build grouped vertex arrays: each attribute is a sub-table
-    local vertices = {
-        { { worldVertices[1],  worldVertices[2],  0 }, { worldVertices[3],  worldVertices[4]  }, { r, g, b, a } },
-        { { worldVertices[5],  worldVertices[6],  0 }, { worldVertices[7],  worldVertices[8]  }, { r, g, b, a } },
-        { { worldVertices[9],  worldVertices[10], 0 }, { worldVertices[11], worldVertices[12] }, { r, g, b, a } },
-        { { worldVertices[13], worldVertices[14], 0 }, { worldVertices[15], worldVertices[16] }, { r, g, b, a } },
-    }
-
-	local mesh = self:makeSlotMesh(slot, 4)
-	local buffer = slot._lovrBuffer
-    buffer:setData(vertices, 1)
-	mesh:setIndices({ 1, 2, 3, 1, 3, 4 })
-
-	mesh:setMaterial(lovr.graphics.newMaterial({ texture = texture }))
-
-	local alphaMode = (region.page and region.page.pma) and "premultiplied" or "alphamultiply"
 	local blendMode = slot.data.blendMode or "normal"
+	local dark = slot.darkColor
+	local tintKey = ""
+	if dark then
+		if self.tintBlack and self.tintBlack.perVertex then
+			tintKey = "tint"
+		else
+			tintKey = string.format("%.3f,%.3f,%.3f,%.3f", dark.r or 0, dark.g or 0, dark.b or 0, dark.a or 0)
+		end
+	end
+	local key = tostring(region.texture) .. "|" .. blendMode .. "|" .. (pma and "1" or "0") .. "|" .. tintKey
 
-	if blendMode == "multiply" then
-		pass:setColor(1, 1, 1, 1)
+	local group = batch.groups[key]
+	if not group then
+		group = {
+			texture = region.texture,
+			blendMode = blendMode,
+			pma = pma,
+			hasDark = dark ~= nil,
+			darkColor = dark,
+			vertices = {},
+			indices = {},
+		}
+		batch.groups[key] = group
+		table.insert(batch.order, group)
 	end
 
-	if blendMode == "additive" then
-		pass:setBlendMode("add", alphaMode)
-	elseif blendMode == "multiply" then
-		pass:setBlendMode("alpha", alphaMode)
-	elseif blendMode == "screen" then
-		pass:setBlendMode("add", alphaMode)
+	local base = #group.vertices
+	local vertexCount
+	local indices
+	if attachment.type == "region" then
+		vertexCount = 4
+		indices = REGION_INDICES
 	else
-		pass:setBlendMode("alpha", alphaMode)
-	end
-
-	local usedShader = false
-	if blendMode == "multiply" and self.multiplyMaskShader then
-		pass:setShader(self.multiplyMaskShader)
-		usedShader = true
-	elseif slot.darkColor and self.tintBlackShader then
-		pass:setShader(self.tintBlackShader)
-		pass:send("darkColor", {
-			slot.darkColor.r or 0,
-			slot.darkColor.g or 0,
-			slot.darkColor.b or 0,
-			slot.darkColor.a or 1,
-		})
-		usedShader = true
-	end
-
-	pass:draw(mesh)
-
-	if usedShader then
-		pass:setShader()
-	end
-
-	pass:setBlendMode("alpha", "alphamultiply")
-end
-
-function Renderer:drawMeshAttachment(slot, attachment, pass, r, g, b, a)
-	local texture = attachment.region and attachment.region.texture
-	if not texture then
-		return
-	end
-
-	local uvs = attachment.uvs
-	local triangles = attachment.triangles
-	if not uvs or not triangles then
-		return
-	end
-
-	local worldVertices = {}
-	attachment:computeWorldVertices(slot, worldVertices)
-
-	for i = 1, #worldVertices do
-		if not isValidNumber(worldVertices[i]) then
-			return
+		vertexCount = #worldVertices / 2
+		indices = attachment._lovrIndices
+		if not indices then
+			indices = {}
+			for i = 1, #attachment.triangles do
+				indices[i] = attachment.triangles[i] + 1
+			end
+			attachment._lovrIndices = indices
 		end
 	end
 
-	local vertexCount = #worldVertices / 2
-	if vertexCount == 0 then
-		return
+	local dr, dg, db, da = 0, 0, 0, 0
+	if dark then
+		dr, dg, db, da = dark.r or 0, dark.g or 0, dark.b or 0, dark.a or 0
 	end
 
-	local vertices = {}
-	for i = 1, vertexCount do
-		local vx = worldVertices[i * 2 - 1] or 0
-		local vy = worldVertices[i * 2] or 0
-		local vu = uvs[i * 2 - 1] or 0
-		local vv = uvs[i * 2] or 0
-        table.insert(vertices, { { vx, vy, 0 }, { vu, vv }, { r, g, b, a } })
-	end
-
-	local mesh = self:makeSlotMesh(slot, vertexCount)
-	local buffer = slot._lovrBuffer
-    buffer:setData(vertices, 1)
-
-	-- Convert Spine 0-based triangles to LOVR 1-based flat index array
-	local indexList = {}
-	for i = 1, #triangles do
-		indexList[i] = triangles[i] + 1
-	end
-	mesh:setIndices(indexList)
-
-	mesh:setMaterial(lovr.graphics.newMaterial({ texture = texture }))
-
-	local alphaMode = (attachment.region and attachment.region.page and attachment.region.page.pma) and "premultiplied"
-		or "alphamultiply"
-	local blendMode = slot.data.blendMode or "normal"
-
-	if blendMode == "multiply" then
-		pass:setColor(1, 1, 1, 1)
-	end
-
-	if blendMode == "additive" then
-		pass:setBlendMode("add", alphaMode)
-	elseif blendMode == "multiply" then
-		pass:setBlendMode("alpha", alphaMode)
-	elseif blendMode == "screen" then
-		pass:setBlendMode("add", alphaMode)
+	if attachment.type == "region" then
+		-- Region worldVertices are interleaved: x, y, u, v per vertex.
+		for i = 1, 4 do
+			local o = (i - 1) * 4
+			table.insert(group.vertices, {
+				{ worldVertices[o + 1], worldVertices[o + 2], 0 },
+				{ worldVertices[o + 3], worldVertices[o + 4] },
+				{ r, g, b, a },
+				{ dr, dg, db, da },
+			})
+		end
 	else
-		pass:setBlendMode("alpha", alphaMode)
+		local uvs = attachment.uvs
+		for i = 1, vertexCount do
+			local vx = worldVertices[i * 2 - 1] or 0
+			local vy = worldVertices[i * 2] or 0
+			local vu = uvs and uvs[i * 2 - 1] or 0
+			local vv = uvs and uvs[i * 2] or 0
+			table.insert(group.vertices, { { vx, vy, 0 }, { vu, vv }, { r, g, b, a }, { dr, dg, db, da } })
+		end
 	end
 
-	local usedShader = false
-	if blendMode == "multiply" and self.multiplyMaskShader then
-		pass:setShader(self.multiplyMaskShader)
-		usedShader = true
-	elseif slot.darkColor and self.tintBlackShader then
-		pass:setShader(self.tintBlackShader)
-		pass:send("darkColor", {
-			slot.darkColor.r or 0,
-			slot.darkColor.g or 0,
-			slot.darkColor.b or 0,
-			slot.darkColor.a or 1,
-		})
-		usedShader = true
+	for i = 1, #indices do
+		group.indices[#group.indices + 1] = indices[i] + base
 	end
+end
 
-	pass:draw(mesh)
+-- Draws all collected groups: one draw call per (texture page, render state).
+function Renderer:flushBatches(batch, pass)
+	for _, group in ipairs(batch.order) do
+		local material = self:getMaterial(group.texture)
+		if not material then
+			-- No way to create a material on this LÖVR version; skip the group.
+			self.vertexCount = self.vertexCount + #group.vertices
+			self.triangleCount = self.triangleCount + #group.indices / 3
+			break
+		end
 
-	if usedShader then
-		pass:setShader()
+		local meshInfo = self:getBatchMesh(group.texture, #group.vertices)
+		if not meshInfo or not meshInfo.mesh then
+			self.vertexCount = self.vertexCount + #group.vertices
+			self.triangleCount = self.triangleCount + #group.indices / 3
+			break
+		end
+
+		local buffer = meshInfo.buffer
+		buffer:setData(group.vertices, 1)
+		local mesh = meshInfo.mesh
+		mesh:setIndices(group.indices)
+		mesh:setMaterial(material)
+
+		local alphaMode = group.pma and "premultiplied" or "alphamultiply"
+
+		if group.blendMode == "multiply" then
+			pass:setColor(1, 1, 1, 1)
+		end
+
+		if group.blendMode == "additive" then
+			pass:setBlendMode("add", alphaMode)
+		elseif group.blendMode == "multiply" then
+			pass:setBlendMode("alpha", alphaMode)
+		elseif group.blendMode == "screen" then
+			pass:setBlendMode("add", alphaMode)
+		else
+			pass:setBlendMode("alpha", alphaMode)
+		end
+
+		local usedShader = false
+		if group.blendMode == "multiply" and self.multiplyMaskShader then
+			pass:setShader(self.multiplyMaskShader)
+			usedShader = true
+		elseif group.hasDark and self.tintBlack and self.tintBlack.shader then
+			pass:setShader(self.tintBlack.shader)
+			if not self.tintBlack.perVertex and group.darkColor then
+				pass:send("darkColor", {
+					group.darkColor.r or 0,
+					group.darkColor.g or 0,
+					group.darkColor.b or 0,
+					group.darkColor.a or 1,
+				})
+			end
+			usedShader = true
+		end
+
+		pass:draw(mesh)
+
+		if usedShader then
+			pass:setShader()
+		end
+
+		pass:setBlendMode("alpha", "alphamultiply")
+
+		self.drawCalls = self.drawCalls + 1
+		self.vertexCount = self.vertexCount + #group.vertices
+		self.triangleCount = self.triangleCount + #group.indices / 3
 	end
-
-	pass:setBlendMode("alpha", "alphamultiply")
 end
 
 function Renderer:drawDebugSkeleton(skeleton, pass)
@@ -385,7 +507,7 @@ function Renderer:drawDebugAttachment(slot, attachment, pass)
 				end
 			end
 			if valid then
-				pass:polygon(
+				passPolygonFlat(pass,
 					"line",
 					verts[1],
 					verts[2],
@@ -423,7 +545,7 @@ function Renderer:drawDebugAttachment(slot, attachment, pass)
 				end
 				local cx = (minX + maxX) / 2
 				local cy = (minY + maxY) / 2
-				pass:box("line", cx, cy, 0, maxX - minX, maxY - minY, 0.01)
+				passBox(pass, "line", cx, cy, 0, maxX - minX, maxY - minY, 0.01)
 			end
 		end
 	elseif attachment.type == "boundingbox" then
@@ -444,7 +566,7 @@ function Renderer:drawDebugAttachment(slot, attachment, pass)
 					table.insert(poly, 0)
 				end
 				if #poly >= 9 then
-					pass:polygon("line", poly)
+					passPolygon(pass, "line", poly)
 				end
 			end
 		end
@@ -459,16 +581,23 @@ SkeletonRenderer.__index = SkeletonRenderer
 function Renderer.new()
 	local self = setmetatable({}, Renderer)
 	self.debug = false
-	self.tintBlackShader = nil
+	self.tintBlack = nil -- { shader = ..., perVertex = bool } or nil
 	self.multiplyMaskShader = nil
+	self.drawCalls = 0
+	self.vertexCount = 0
+	self.triangleCount = 0
+	self.materials = setmetatable({}, { __mode = "k" })
+	self.batchMeshes = setmetatable({}, { __mode = "k" })
+	self.stencilOk = nil -- nil = not probed yet
+	self.hasStencil = true
 
 	local ok, result = pcall(require, "spine.tintblack_shader")
-	if ok then
-		self.tintBlackShader = result
+	if ok and type(result) == "table" and result.shader then
+		self.tintBlack = result
 	end
 
 	local ok2, result2 = pcall(require, "spine.multiply_mask_shader")
-	if ok2 then
+	if ok2 and type(result2) == "userdata" then
 		self.multiplyMaskShader = result2
 	end
 
@@ -482,13 +611,22 @@ function SkeletonRenderer.new()
 	return self
 end
 
-function SkeletonRenderer:draw(skeleton, pass, transform)
+-- Draw the skeleton. Accepts either a Mat4 transform or the same positional
+-- arguments as spine.draw: (x, y, z, scaleX, scaleY, scaleZ, rotation).
+function SkeletonRenderer:draw(skeleton, pass, ...)
+	local transform = mathModule.buildTransform(...)
+	self.renderer.debug = self.debug
 	self.renderer:drawSkeleton(skeleton, pass, transform)
+end
 
-	if self.debug then
-		self.renderer.debug = true
-		self.renderer:drawDebugSkeleton(skeleton, pass)
+function SkeletonRenderer:drawDebug(skeleton, pass, ...)
+	local transform = mathModule.buildTransform(...)
+	pass:push()
+	if transform then
+		pass:transform(transform)
 	end
+	self.renderer:drawDebugSkeleton(skeleton, pass)
+	pass:pop()
 end
 
 function SkeletonRenderer:setDebug(debug)
