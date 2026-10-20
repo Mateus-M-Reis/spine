@@ -1,9 +1,9 @@
--- Love2D Configuration for Spine Playground
-function love.conf(t)
+-- LÖVR configuration for Spine Playground
+function lovr.conf(t)
     t.window.title = "Spine Playground - Interactive Animation Viewer"
-    t.window.width = 1024
-    t.window.height = 768
-    t.window.resizable = true
-    t.window.vsync = true
-    t.console = true -- Enable console for debugging output
+    t.window.width = 1280
+    t.window.height = 800
+
+    -- Force desktop (mirror) mode so the example runs on a regular computer.
+    t.headset.drivers = { "desktop" }
 end

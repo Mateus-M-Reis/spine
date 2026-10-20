@@ -1,0 +1,31 @@
+{
+  "skeleton": { "hash": "seq", "spine": "4.2.00", "width": 64, "height": 64 },
+  "bones": [ { "name": "root" } ],
+  "slots": [ { "name": "s", "bone": "root", "attachment": "img" } ],
+  "skins": {
+    "default": {
+      "s": {
+        "img": {
+          "type": "region",
+          "path": "squash",
+          "sequence": { "count": 3, "start": 0, "digits": 0, "setup": 0 },
+          "width": 32, "height": 32
+        }
+      }
+    }
+  },
+  "animations": {
+    "spin": {
+      "slots": { "s": { "attachment": [ { "time": 0, "name": "img" } ] } },
+      "attachments": {
+        "default": {
+          "s": {
+            "img": {
+              "sequence": [ { "time": 0, "mode": "loop", "index": 0, "delay": 0.1 } ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

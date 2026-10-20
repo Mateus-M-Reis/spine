@@ -1,108 +1,79 @@
 # Spine Playground - Interactive Animation Viewer
 
-An interactive demo for loading and playing Spine animations with a visual UI. **Simply drag & drop your Spine files to play any character!**
+An interactive LÖVR demo for loading and playing Spine animations with an
+in-world HUD. Pick an asset, play any of its animations, move/zoom the
+skeleton, and inspect bones.
 
 ## Quick Start
 
-### Method 1: Drag & Drop (Recommended)
-1. Run the demo: `cd examples/spine_playground && love .`
-2. Drag your Spine export files (.json, .atlas, .png) into the window
-3. Watch your character load automatically!
-4. Click any animation to play it
-
-### Method 2: Manual Configuration
-Edit `main.lua` to change the default asset (see "Loading Different Assets" below)
+```bash
+cd examples/spine_playground
+lovr .
+```
 
 ## Features
 
-- 📋 **Animation List**: See all available animations from any Spine export
-- 🖱️ **Click to Play**: Simply click on an animation name to play it
-- ⌨️ **Keyboard Shortcuts**: Quick access with number keys 1-9
-- 🎮 **Interactive Controls**: Move, scale, and debug your skeleton
-- 🎨 **Clean UI**: Modern interface with panels and visual feedback
-
-## How to Run
-
-```bash
-cd examples/spine_playground
-love .
-```
+- **Animation List**: All animations from the loaded Spine export, shown on the
+  left HUD panel.
+- **Keyboard Driven UI**: 1-9 or Up/Down to select animations, Tab/N to switch
+  assets, arrows to move the skeleton, +/- to zoom.
+- **Smooth Transitions**: All animation switches crossfade over 0.2s.
+- **Debug Rendering**: Press D to draw bones, slots, and attachment bounds.
+- **Mix & Match**: The `mix_and_match` asset auto-applies the
+  `full-skins/girl` skin.
 
 ## Controls
 
-### Animation Selection
-- **Click** on any animation in the list to play it
-- **1-9**: Quick select animations by number
-- **Up/Down Arrow**: Navigate through animation list
-
-### Skeleton Manipulation
-- **Arrow Keys**: Move the skeleton around
-- **+/-**: Zoom in/out
-- **R**: Reset position and scale
-
-### View Options
-- **D**: Toggle debug rendering (shows bones, slots, attachments)
-- **H**: Toggle help panel
-- **ESC**: Exit
-
-### Mouse
-- **Scroll Wheel**: Scroll through animation list (when hovering over it)
-- **Click**: Select animation to play
+| Key            | Action                                  |
+| -------------- | --------------------------------------- |
+| `1`-`9`        | Play animation by number                |
+| `Space`        | Cycle to the next animation             |
+| `Up`/`Down`    | Previous / next animation               |
+| `[` / `]`      | Scroll the animation list               |
+| `Tab` or `N`   | Next asset                              |
+| `P`            | Previous asset                          |
+| `Arrow keys`   | Move the skeleton (hold)                |
+| `+` / `-`      | Zoom in / out                           |
+| `D`            | Toggle debug rendering                  |
+| `Y`            | Flip the skeleton vertically            |
+| `B`            | Print bone hierarchy/transforms to console |
+| `R`            | Reset position and zoom                 |
+| `H`            | Toggle help text                        |
+| `U`            | Toggle the HUD                          |
+| `Esc`          | Quit                                    |
 
 ## Loading Different Assets
 
-To load a different Spine character, edit `main.lua` and change:
+Edit `CONFIG` at the top of `main.lua`:
 
 ```lua
 local CONFIG = {
-    currentAsset = "spineboy",  -- Change to "coin" or add your own
-    ...
+    currentAsset = "spineboy_pro", -- change this
+    assets = {
+        spineboy_pro = {
+            atlas = "assets/spineboy-pro/spineboy-pro.atlas",
+            json  = "assets/spineboy-pro/spineboy-pro.json",
+            scale = 0.004, -- world units; ~0.003-0.006 fits LÖVR scenes
+        },
+        -- add your own exports here
+    },
 }
 ```
 
-### Adding Your Own Assets
+To add your own character, place its `.json`, `.atlas`, and `.png` files in
+`assets/your_character/`, add an entry to `CONFIG.assets`, and set
+`currentAsset = "your_character"`.
 
-1. Add your Spine export files to `examples/assets/your_character/`
-2. Edit the `CONFIG.assets` table in `main.lua`:
+## Notes
 
-```lua
-assets = {
-    your_character = {
-        atlas = "../assets/your_character/file.atlas",
-        json = "../assets/your_character/file.json",
-        scale = 0.5,
-        x = 400,
-        y = 400
-    }
-}
-```
-
-3. Change `currentAsset = "your_character"`
-
-## UI Layout
-
-- **Left Panel**: Animation list with total count
-  - Green highlight = currently playing
-  - Gray highlight = hover state
-  
-- **Right Panel**: Information and controls
-  - Current asset name
-  - Currently playing animation
-  - FPS counter
-  - Scale value
-  - Controls help (press H to toggle)
-
-## Animation Features
-
-- **Auto-loop Detection**: Animations automatically loop unless they contain keywords like "death", "jump", or "shoot"
-- **Smooth Transitions**: All animations have smooth mixing/blending between them
-- **Sorted List**: Animations are alphabetically sorted for easy browsing
+- The skeleton is drawn in 3D world space at `(0, 0, -3)`; the HUD panels float
+  in front of the desktop camera at `z = -1.4`.
+- Drag & drop file loading is not supported in this port; use `CONFIG` instead.
+- The demo uses the high-level `spine.loadSkeleton` API, so it doubles as an
+  example of the quick-start workflow.
 
 ## Default Assets
 
-The playground comes with two demo assets:
-
-1. **Spineboy** (default): Character with 7 animations
-2. **Coin**: Spinning coin with animation effect
-
-Switch between them by editing `currentAsset` in the config.
+The playground ships with several Spine sample exports: spineboy variants,
+stretchyman, coin, alien, windmill, tank, sack, cloud-pot, powerup, and the
+mix-and-match demo.

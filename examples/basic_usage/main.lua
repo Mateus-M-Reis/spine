@@ -76,6 +76,7 @@ function lovr.update(dt)
 
     animationState:update(dt)
     animationState:apply(skeleton)
+    skeleton:update(dt) -- advance skeleton time (physics constraints, attachment timing)
     skeleton:updateWorldTransform()
 end
 
@@ -87,8 +88,10 @@ function lovr.draw(pass)
 
     -- Position the skeleton in 3D space
     -- (x, y, z, scaleX, scaleY, scaleZ, rotation)
+    -- LÖVR is y-up like Spine, so no vertical flip is needed. If a particular
+    -- export appears upside down, negate scaleY.
     local x, y, z = 0, 0, -2
-    local sx, sy, sz = 0.003, -0.003, 0.003
+    local sx, sy, sz = 0.003, 0.003, 0.003
     local rotation = 0
 
     renderer:draw(skeleton, pass, x, y, z, sx, sy, sz, rotation)

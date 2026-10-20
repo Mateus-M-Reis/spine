@@ -6,13 +6,16 @@ A complete Spine skeletal animation runtime for LÖVR, implementing the Spine an
 
 - **Complete Spine Runtime**: Full implementation of Spine's animation system (Spine 4.2.x compatible).
 - **LÖVR Integration**: Native LÖVR graphics API integration using Pass-based rendering with dynamic Meshes and Buffers.
+- **Batched Rendering**: Attachments are batched per texture page and render state — e.g. the 191-attachment tank demo draws in 3 draw calls.
+- **Asset Caching**: `loadSkeleton` shares `SkeletonData` and atlas textures across instances (see `spine.clearAssetCache`).
 - **Attachments**: Supports Region, Mesh, BoundingBox, and Path attachments.
-- **Animation**: Timeline-based animations with mixing, blending, and events.
+- **Sequences**: Spine 4.2 sequence attachments and sequence timelines (hold/once/loop/pingpong modes).
+- **Animation**: Timeline-based animations with crossfade mixing, multi-track layering (track alpha and mixBlend), and events (listener API).
 - **Constraints**: IK, Transform, Path, and Physics constraints.
 - **Skins**: Runtime skin switching.
 - **3D Positioning**: Place skeletons anywhere in 3D space with full transform control.
-- **Stencil Clipping**: Hardware-accelerated clipping attachment support.
-- **Custom Shaders**: Tint-black dual-color tinting and multiply blend mode shaders.
+- **Stencil Clipping**: Hardware-accelerated clipping attachments, including nested clips.
+- **Custom Shaders**: Tint-black dual-color tinting (per-vertex dark color) and multiply blend mode shaders.
 
 ## Installation
 
@@ -31,20 +34,64 @@ local spine = require("init")
 local instance
 
 function lovr.load()
-  instance = spine.loadSkeleton("assets/hero.json", "assets/hero.atlas", 0.5)
+  -- The scale argument converts Spine's pixel units to world units.
+  -- Exports are usually authored at ~1000px, so 0.001-0.005 fits LÖVR scenes.
+  instance = spine.loadSkeleton("assets/hero.json", "assets/hero.atlas", 0.005)
   if instance.animationState then
     instance.animationState:setAnimation(0, "walk", true)
   end
 end
 
 function lovr.update(dt)
+  -- Updates animation state, applies it, advances skeleton time (needed for
+  -- physics constraints), and updates world transforms.
   spine.update(instance, dt)
 end
 
 function lovr.draw(pass)
-  -- Draw at position (0, 0, -3) with default scale/rotation
-  spine.draw(instance, pass, 0, 0, -3)
+  -- Draw at position (0, 0, -3) with the given scale/rotation.
+  spine.draw(instance, pass, 0, 0, -3, 0.005, 0.005, 0.005, 0)
 end
+```
+
+`spine.loadSkeleton` accepts JSON as a path or decoded table, and the atlas as a
+path, raw atlas text, or an already-built `Atlas`. The returned `instance` has
+`skeleton`, `skeletonData`, `animationState`, `animationStateData`, `renderer`,
+`atlas`, and `attachmentLoader` fields. The skeleton is initialized to its
+setup pose automatically.
+
+`SkeletonData` and atlas textures are cached and shared between instances, so
+spawning many copies of the same character reuses textures and parsed data
+(each call still gets its own `Skeleton`/renderer). Call
+`spine.clearAssetCache()` to release all cached resources.
+
+### Animation events
+
+```lua
+instance.animationState:addListener({
+  event = function(trackIndex, event)
+    print("event", event.name, "on track", trackIndex, "int:", event.intValue)
+  end,
+  complete = function(trackIndex)
+    print("track", trackIndex, "completed")
+  end,
+})
+
+-- Crossfades between animations are automatic: the duration comes from
+-- AnimationStateData (default 0.25s, configurable with setMix/setDefaultMix).
+instance.animationState:setAnimation(0, "walk", true)
+instance.animationState:setAnimation(0, "run", true) -- crossfades from walk
+```
+
+### Track layering
+
+```lua
+-- Play an additive upper-body animation on track 1 over the lower body.
+instance.animationState:setAnimation(0, "run", true)
+local upper = instance.animationState:setAnimation(1, "shoot", true)
+upper.alpha = 0.8          -- track weight
+upper.mixBlend = "add"     -- "setup", "first", "replace", or "add"
+-- equivalently: setTrackAlpha(1, 0.8) / setTrackMixBlend(1, "add")
 ```
 
 ## Advanced Usage
@@ -82,12 +129,13 @@ end
 function lovr.update(dt)
   animationState:update(dt)
   animationState:apply(skeleton)
+  skeleton:update(dt) -- advance skeleton time (physics constraints need it)
   skeleton:updateWorldTransform()
 end
 
 function lovr.draw(pass)
-  -- Draw with full transform control: x, y, z, scaleX, scaleY, scaleZ, rotation
-  renderer:draw(skeleton, pass, 0, 1, -3, 0.005, -0.005, 0.005, 0)
+  -- Component form: x, y, z, scaleX, scaleY, scaleZ, rotation
+  renderer:draw(skeleton, pass, 0, 1, -3, 0.005, 0.005, 0.005, 0)
 end
 ```
 
@@ -118,14 +166,46 @@ end
   - `utils.lua` - JSON parser, profiler, cache, and triangulation utilities
   - `tintblack_shader.lua` - Dual-color tinting fragment shader
   - `multiply_mask_shader.lua` - Multiply blend mode fragment shader
-  - `alpha_clip_shader.lua` - Alpha clipping fragment shader
 - `examples/`: Example projects.
+- `tests/`: Headless test suite (see Testing below).
+
+## Testing
+
+The runtime can be tested without LÖVR using the bundled LÖVR stub:
+
+```bash
+luajit tests/run.lua          # runtime test suite
+luajit tests/run_examples.lua # loads/updates/draws both example projects
+```
+
+The suite covers high-level loading (atlas binding, setup pose), asset caching,
+skeleton time advancement, batched rendering call counts and material caching,
+stencil clipping (including the no-stencil fallback), animation crossfades,
+track layering, event dispatch, Spine 4.2 sequences, and queued animations.
 
 ## Requirements
 
-- LÖVR 0.18 or higher
+- LÖVR 0.18 or higher is the primary target
 - Spine 4.2.x compatible JSON exports
+
+### Compatibility notes
+
+The renderer degrades gracefully across LÖVR versions:
+
+- Shader dialects are detected at load time (LÖVR 0.18 `texture`/`VertexUV`
+  style and the `getPixel`/`Color`/`UV` style used by older/newer builds); the
+  tint-black shader falls back to a per-dark-color uniform when per-vertex
+  dark colors are unavailable.
+- `pass:polygon`/`pass:box` are called with and without a mode argument as
+  needed (older builds have no mode string).
+- Material creation tries both `newMaterial({ texture = ... })` and
+  `newMaterial(texture)`.
+- If the pass has no stencil-capable depth format, clipping attachments simply
+  render unclipped instead of using the stencil buffer.
 
 ## License
 
-This runtime is provided for use with Spine animations. Please ensure you have the appropriate licenses for the Spine software and any Spine assets you use.
+This runtime is released under the MIT License (see [LICENSE](LICENSE)).
+Please ensure you have the appropriate licenses for the Spine software and any
+Spine assets you use; the bundled sample assets remain under their original
+licensing terms.

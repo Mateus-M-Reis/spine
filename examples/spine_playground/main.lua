@@ -1,167 +1,180 @@
--- Spine Love2D Runtime - Interactive Playground
--- Load any Spine export files and play animations interactively
+-- Spine LÖVR Runtime - Interactive Playground
+-- Load Spine exports and play animations interactively.
+--
+-- Run: cd examples/spine_playground && lovr .
+--
+-- This is a port of the original Love2D playground to LÖVR. The skeleton is
+-- drawn in 3D world space, and the HUD panels are fixed in world space in
+-- front of the default desktop camera. The UI is keyboard-driven.
 
--- Add parent directories to package path so we can require spine-love2d
+-- Add parent directory to the package path so we can require the runtime.
 package.path = package.path .. ";../../?.lua"
 local spine = require("init")
 
--- Configuration: Change these to load different Spine characters
+-- Configuration: change these to load different Spine characters.
 local CONFIG = {
-    -- Current asset to load (options: "spineboy", "coin", "windmill", "mix_and_match")
+    -- Current asset to load (any key of `assets` below).
     currentAsset = "spineboy_pro",
-    
-    -- Asset paths
+
     assets = {
-        mix_and_match = {
-            atlas = "assets/mix-and-match/mix-and-match-pro.atlas",
-            json = "assets/mix-and-match/mix-and-match-pro.json",
-            scale = 0.5,
-            x = 400,
-            y = 500
-        },
-        spineboy_pro = {
-            atlas = "assets/spineboy-pro/spineboy-pro.atlas",
-            json = "assets/spineboy-pro/spineboy-pro.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        spineboy_ess = {
-            atlas = "assets/spineboy_ess/spineboy.atlas",
-            json = "assets/spineboy_ess/spineboy-ess.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        stretchyman = {
-            atlas = "assets/stretchyman/stretchyman-pro.atlas",
-            json = "assets/stretchyman/stretchyman-pro.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        
-        coin = {
-            atlas = "assets/coin/coin.atlas",
-            json = "assets/coin/coin-pro.json",
-            scale = 0.3,
-            x = 400,
-            y = 400
-        },
-        alien = {
-            atlas = "assets/alien/alien.atlas",
-            json = "assets/alien/alien.json",
-            scale = 0.3,
-            x = 400,
-            y = 400
-        },
-        alien_pro = {
-            atlas = "assets/alien-pro/alien-pro.atlas",
-            json = "assets/alien-pro/alien-pro.json",
-            scale = 0.3,
-            x = 400,
-            y = 400
-        },
-        windmill = {
-            atlas = "assets/windmill/windmill.atlas",
-            json = "assets/windmill/windmill-ess.json",
-            scale = 0.5,
-            x = 500,
-            y = 500
-        },  
-        tank = {
-            atlas = "assets/tank/tank-pro.atlas",
-            json = "assets/tank/tank-pro.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        sack = {
-            atlas = "assets/sack/sack.atlas",
-            json = "assets/sack/sack-pro.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        cloud_pot = {
-            atlas = "assets/cloud-pot/cloud-pot.atlas",
-            json = "assets/cloud-pot/cloud-pot.json",
-            scale = 0.5,
-            x = 400,
-            y = 550
-        },
-        powerup = {
-            atlas = "assets/powerup/powerup.atlas",
-            json = "assets/powerup/powerup-pro.json",
-            scale = 1,
-            x = 400,
-            y = 550
-        },
-    }
+        mix_and_match = { atlas = "assets/mix-and-match/mix-and-match-pro.atlas", json = "assets/mix-and-match/mix-and-match-pro.json", scale = 0.004 },
+        spineboy_pro  = { atlas = "assets/spineboy-pro/spineboy-pro.atlas",   json = "assets/spineboy-pro/spineboy-pro.json",   scale = 0.004 },
+        spineboy_ess  = { atlas = "assets/spineboy_ess/spineboy.atlas",       json = "assets/spineboy_ess/spineboy-ess.json",  scale = 0.004 },
+        stretchyman   = { atlas = "assets/stretchyman/stretchyman-pro.atlas",  json = "assets/stretchyman/stretchyman-pro.json", scale = 0.004 },
+        coin          = { atlas = "assets/coin/coin.atlas",                    json = "assets/coin/coin-pro.json",             scale = 0.004 },
+        alien         = { atlas = "assets/alien/alien.atlas",                  json = "assets/alien/alien.json",               scale = 0.003 },
+        alien_pro     = { atlas = "assets/alien-pro/alien-pro.atlas",          json = "assets/alien-pro/alien-pro.json",       scale = 0.003 },
+        windmill      = { atlas = "assets/windmill/windmill.atlas",            json = "assets/windmill/windmill-ess.json",     scale = 0.004 },
+        tank          = { atlas = "assets/tank/tank-pro.atlas",                json = "assets/tank/tank-pro.json",             scale = 0.004 },
+        sack          = { atlas = "assets/sack/sack.atlas",                    json = "assets/sack/sack-pro.json",             scale = 0.004 },
+        cloud_pot     = { atlas = "assets/cloud-pot/cloud-pot.atlas",          json = "assets/cloud-pot/cloud-pot.json",       scale = 0.004 },
+        powerup       = { atlas = "assets/powerup/powerup.atlas",              json = "assets/powerup/powerup-pro.json",       scale = 0.006 },
+    },
 }
 
 local playground = {
-    skeleton = nil,
-    animationState = nil,
-    renderer = nil,
-    atlas = nil,
-    skeletonData = nil,
-    
-    -- Animation list
+    instance = nil, -- high-level instance from spine.loadSkeleton
+
     animations = {},
     currentAnimation = nil,
     currentAnimationIndex = 1,
+
     assetNames = {},
     currentAssetIndex = 1,
-    
+    currentAssetName = nil,
+
     showDebug = false,
     showHelp = true,
-    loadError = nil,
     showHud = true,
-    
-    -- Performance tracking
+    loadError = nil,
+
+    -- World-space placement of the skeleton (meters).
+    x = 0,
+    y = 0,
+    z = -3,
+    zoom = 1, -- draw scale multiplier
+
     fps = 0,
-    frameTime = 0,
-    
-    -- Visual settings
-    backgroundColor = {0.15, 0.15, 0.25},
-    skeletonX = 400,
-    skeletonY = 400,
-    scale = 0.5,
-    
-    -- UI layout
-    assetListWidth = 200,
-    assetListX = 10,
-    assetListY = 10,
-    assetItemHeight = 26,
-    assetScrollOffset = 0,
-    assetMaxVisibleItems = 12,
-    animationListWidth = 260,
-    animationListX = 220,
-    animationListY = 10,
-    animationItemHeight = 26,
     scrollOffset = 0,
-    maxVisibleItems = 15,
-    
-    hoveredAnimationIndex = nil,
-    hoveredAssetIndex = nil,
-    
-    droppedFiles = {},
-    isDragging = false,
-    currentAssetName = nil
+    maxVisibleItems = 20,
+    itemHeight = 0.045,
 }
 
-function love.load()
-    -- Set up window
-    love.window.setTitle("Spine Playground - Interactive Animation Viewer")
-    love.window.setMode(1024, 768)
-    love.graphics.setBackgroundColor(playground.backgroundColor)
-    
+-- HUD layout (world space, meters). Panels float in front of the desktop
+-- camera at z = -1.4.
+local HUD = {
+    z = -1.4,
+    textScale = 0.0035,
+    assetPanel = { x = -1.05, y = 1.75, w = 0.5, headerH = 0.09, itemH = 0.04 },
+    animPanel  = { x = -0.45, y = 1.75, w = 0.55, headerH = 0.09, itemH = 0.04 },
+    infoPanel  = { x = 0.25,  y = 1.75, w = 0.55, headerH = 0.09, itemH = 0.04 },
+}
+
+local keysDown = {}
+local function isDown(key)
+    return keysDown[key] == true
+end
+
+---------------------------------------------------------------------------
+-- Asset loading
+
+local function setupMixAndMatch(skeleton, skeletonData)
+    print("Applying Mix and Match skins...")
+    local skinName = "full-skins/girl"
+    if skeletonData.skins[skinName] then
+        skeleton:setSkin(skinName)
+    elseif skeletonData.skins["skin-base"] then
+        print("Skin '" .. skinName .. "' not found; falling back to 'skin-base'")
+        skeleton:setSkin("skin-base")
+    else
+        print("Warning: no mix-and-match skin found")
+        return
+    end
+    print("Set skin: " .. skinName)
+    skeleton:setSlotsToSetupPose()
+    skeleton:updateWorldTransform()
+end
+
+local function loadSpineAsset(assetName)
+    local asset = CONFIG.assets[assetName]
+    if not asset then
+        return nil, "Unknown asset: " .. assetName
+    end
+
+    -- Load via the high-level API (atlas binding and setup pose are handled).
+    local ok, instance = pcall(spine.loadSkeleton, asset.json, asset.atlas, asset.scale)
+    if not ok then
+        return nil, tostring(instance)
+    end
+    playground.instance = instance
+    playground.currentAssetName = assetName
+
+    -- Animation list (sorted).
+    playground.animations = {}
+    for name in pairs(instance.skeletonData.animations) do
+        table.insert(playground.animations, name)
+    end
+    table.sort(playground.animations)
+    if #playground.animations == 0 then
+        return nil, "No animations found in skeleton data"
+    end
+
+    -- Smooth all-to-all transitions.
+    local stateData = instance.animationStateData
+    for _, a in ipairs(playground.animations) do
+        for _, b in ipairs(playground.animations) do
+            if a ~= b then
+                stateData:setMix(a, b, 0.2)
+            end
+        end
+    end
+
+    if assetName == "mix_and_match" then
+        setupMixAndMatch(instance.skeleton, instance.skeletonData)
+    end
+
+    playground.scrollOffset = 0
+    playground.zoom = 1
+    setAnimation(1)
+
+    print(string.format("Loaded %s: %d bones, %d animations", assetName,
+        #instance.skeletonData.bones, #playground.animations))
+    return true
+end
+
+local function setAssetByIndex(index)
+    if index < 1 or index > #playground.assetNames then return end
+    if index == playground.currentAssetIndex and playground.instance then return end
+
+    playground.currentAssetIndex = index
+    local ok, err = loadSpineAsset(playground.assetNames[index])
+    playground.loadError = ok and nil or (err or "Failed to load assets")
+end
+
+local function shouldLoop(name)
+    local n = name:lower()
+    return not n:find("death") and not n:find("jump") and not n:find("shoot")
+end
+
+function setAnimation(index)
+    if index < 1 or index > #playground.animations then return end
+    playground.currentAnimationIndex = index
+    playground.currentAnimation = playground.animations[index]
+    local loop = shouldLoop(playground.currentAnimation)
+    playground.instance.animationState:setAnimation(0, playground.currentAnimation, loop)
+    print("Playing animation: " .. playground.currentAnimation .. (loop and " (looping)" or " (once)"))
+end
+
+---------------------------------------------------------------------------
+-- LÖVR callbacks
+
+function lovr.load()
     playground.assetNames = {}
-    for name, _ in pairs(CONFIG.assets) do
+    for name in pairs(CONFIG.assets) do
         table.insert(playground.assetNames, name)
     end
     table.sort(playground.assetNames)
+
     playground.currentAssetIndex = 1
     for i, name in ipairs(playground.assetNames) do
         if name == CONFIG.currentAsset then
@@ -169,727 +182,211 @@ function love.load()
             break
         end
     end
-    
-    -- Update CONFIG to center assets on screen
-    local centerX = love.graphics.getWidth() / 2
-    local centerY = love.graphics.getHeight() * 0.8
-    for _, asset in pairs(CONFIG.assets) do
-        asset.x = centerX
-        asset.y = centerY
-    end
-    
-    -- Load current asset
-    local success, err = loadSpineAsset(CONFIG.currentAsset)
-    if not success then
-        print("Failed to load Spine assets: " .. (err or "unknown error"))
+
+    local ok, err = loadSpineAsset(CONFIG.currentAsset)
+    if not ok then
         playground.loadError = err or "Failed to load assets"
+        print("ERROR: " .. playground.loadError)
     end
-    
-    print("Spine Playground loaded successfully!")
-    print("Press H for help or drag Spine files into window")
-    print("Click on animations to play them")
-    if #playground.animations > 0 then
-        print("Found " .. #playground.animations .. " animations")
+
+    print("Spine Playground loaded. Press H for help.")
+end
+
+function lovr.update(dt)
+    if playground.loadError or not playground.instance then return end
+
+    -- Smoothed FPS estimate.
+    playground.fps = playground.fps * 0.95 + (1 / math.max(dt, 1e-4)) * 0.05
+
+    local state, skeleton = playground.instance.animationState, playground.instance.skeleton
+    state:update(dt)
+    state:apply(skeleton)
+    skeleton:update(dt) -- advance skeleton time (physics constraints need it)
+    skeleton:updateWorldTransform()
+
+    -- Continuous input.
+    local speed = 0.6 * dt
+    if isDown("left") then playground.x = playground.x - speed end
+    if isDown("right") then playground.x = playground.x + speed end
+    if isDown("up") then playground.y = playground.y + speed end
+    if isDown("down") then playground.y = playground.y - speed end
+end
+
+local function drawPanel(pass, panel, totalHeight, r, g, b, a)
+    pass:setColor(r, g, b, a or 0.8)
+    -- LÖVR 0.18 uses box(mode, ...); some builds use box(...) with no mode.
+    local ok = pcall(pass.box, pass, "fill", panel.x, panel.y - totalHeight / 2, HUD.z, panel.w, totalHeight, 0.01)
+    if not ok then
+        pcall(pass.box, pass, panel.x, panel.y - totalHeight / 2, HUD.z, panel.w, totalHeight, 0.01)
     end
 end
 
-function loadSpineAsset(assetName, customPaths, fileContents)
-    local asset
-    local atlasText, skeletonJson
-    
-    if fileContents then
-        -- Load from provided file contents (for drag-and-drop)
-        atlasText = fileContents.atlas
-        skeletonJson = fileContents.json
-        asset = customPaths or {scale = 0.5, x = 400, y = 400}
-    elseif customPaths then
-        -- Load from custom paths
-        asset = customPaths
-        atlasText = love.filesystem.read(asset.atlas)
-        if not atlasText then
-            return nil, "Could not load atlas file: " .. asset.atlas
-        end
-        skeletonJson = love.filesystem.read(asset.json)
-        if not skeletonJson then
-            return nil, "Could not load skeleton JSON: " .. asset.json
-        end
-    else
-        -- Load from CONFIG
-        asset = CONFIG.assets[assetName]
-        if not asset then
-            return nil, "Unknown asset: " .. assetName
-        end
-        atlasText = love.filesystem.read(asset.atlas)
-        if not atlasText then
-            return nil, "Could not load atlas file: " .. asset.atlas
-        end
-        skeletonJson = love.filesystem.read(asset.json)
-        if not skeletonJson then
-            return nil, "Could not load skeleton JSON: " .. asset.json
-        end
-    end
-    
-    playground.currentAssetName = assetName
-    print("Loading asset: " .. (assetName or "custom"))
-    
-    if playground.assetNames then
-        playground.currentAssetIndex = nil
-        for i, name in ipairs(playground.assetNames) do
-            if name == assetName then
-                playground.currentAssetIndex = i
-                break
-            end
-        end
-    end
-    
-    
-    -- Create Atlas from text
-    playground.atlas = spine.atlas.Atlas.new()
-    local basePath = ""
-    if asset.atlas then
-        basePath = string.match(asset.atlas, "(.*/)[^/]*$") or ""
-    end
-    local atlasSuccess, atlasErr = playground.atlas:loadAtlasFile(atlasText, basePath)
-    if not atlasSuccess then
-        return nil, "Failed to load atlas: " .. (atlasErr or "unknown error")
-    end
-    
-    -- Create attachment loader
-    local attachmentLoader = spine.atlas.AtlasAttachmentLoader.new(playground.atlas)
-    
-    -- Create skeleton data
-    playground.skeletonData = spine.SkeletonData.new()
-    local loadSuccess, loadErr = pcall(function()
-        local jsonTable, decodeErr = spine.utils.jsonDecode(skeletonJson)
-        if not jsonTable then
-            error("Failed to decode skeleton JSON: " .. tostring(decodeErr))
-        end
-        playground.skeletonData:loadFromJson(jsonTable, attachmentLoader)
-    end)
-    
-    if not loadSuccess then
-        return nil, "Failed to parse skeleton JSON: " .. (loadErr or "unknown error")
-    end
-    
-    -- Extract animation names
-    playground.animations = {}
-    if playground.skeletonData.animations then
-        for name, _ in pairs(playground.skeletonData.animations) do
-            table.insert(playground.animations, name)
-        end
-        table.sort(playground.animations)
-    end
-    
-    if #playground.animations == 0 then
-        return nil, "No animations found in skeleton data"
-    end
-    
-    -- Create skeleton instance
-    playground.skeleton = spine.skeleton.Skeleton.new(playground.skeletonData)
-    
-    -- Apply mix and match if applicable
-    if assetName == "mix_and_match" then
-        setupMixAndMatch(playground.skeleton, playground.skeletonData)
-    end
-    
-    playground.skeleton:setToSetupPose()
-    playground.skeleton:updateWorldTransform()
-    
-    -- Create animation state
-    local animationStateData = spine.data.AnimationStateData.new(playground.skeletonData)
-    
-    -- Configure animation mixing for smooth transitions (all to all)
-    for i, anim1 in ipairs(playground.animations) do
-        for j, anim2 in ipairs(playground.animations) do
-            if i ~= j then
-                animationStateData:setMix(anim1, anim2, 0.2)
-            end
-        end
-    end
-    
-    playground.animationState = spine.animation.AnimationState.new(animationStateData)
-    
-    -- Create renderer
-    playground.renderer = spine.rendering.SkeletonRenderer.new()
-    
-    -- Set initial position and scale
-    -- Force center of screen (X) and lower ground (Y)
-    playground.skeletonX = love.graphics.getWidth() / 2
-    playground.skeletonY = love.graphics.getHeight() * 0.8
-    playground.scale = asset.scale
-    
-    print("Skeleton positioned at: " .. playground.skeletonX .. ", " .. playground.skeletonY)
-    print("Window dimensions: " .. love.graphics.getWidth() .. "x" .. love.graphics.getHeight())
-    
-    -- Play first animation by default
-    if #playground.animations > 0 then
-        setAnimation(1)
-    end
-    
-    return true
+local function drawText(pass, str, x, y, r, g, b)
+    pass:setColor(r or 1, g or 1, b or 1)
+    pass:text(str, x, y, HUD.z + 0.011, HUD.textScale)
 end
 
-function setAssetByIndex(index)
-    if not playground.assetNames or index < 1 or index > #playground.assetNames then
-        return
-    end
-    
-    if playground.currentAssetIndex == index and playground.skeleton then
-        return
-    end
-    
-    local assetName = playground.assetNames[index]
-    CONFIG.currentAsset = assetName
-    playground.currentAssetIndex = index
-    
-    local success, err = loadSpineAsset(assetName)
-    if not success then
-        playground.loadError = err or "Failed to load assets"
-    else
-        playground.loadError = nil
-        playground.scrollOffset = 0
-    end
-end
+local function drawListPanel(pass, panel, title, count, items, currentIndex, scrollOffset, highlightColor, getExtra)
+    local maxVisible = math.min(count, playground.maxVisibleItems)
+    local headerH = panel.headerH
+    local itemH = panel.itemH
+    local totalHeight = headerH + maxVisible * itemH
 
-function setAnimation(index)
-    if index < 1 or index > #playground.animations then
-        return
-    end
-    
-    playground.currentAnimationIndex = index
-    playground.currentAnimation = playground.animations[index]
-    
-    -- Determine if animation should loop (non-action animations loop)
-    local shouldLoop = not string.match(playground.currentAnimation:lower(), "death") 
-                   and not string.match(playground.currentAnimation:lower(), "jump")
-                   and not string.match(playground.currentAnimation:lower(), "shoot")
-    
-    playground.animationState:setAnimation(0, playground.currentAnimation, shouldLoop)
-    print("Playing animation: " .. playground.currentAnimation .. (shouldLoop and " (looping)" or ""))
-end
+    drawPanel(pass, panel, totalHeight, 0, 0, 0, 0.85)
+    drawPanel(pass, { x = panel.x, y = panel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
 
-function love.update(dt)
-    -- Skip updates if assets failed to load
-    if playground.loadError then
-        return
-    end
-    
-    -- Update performance tracking
-    playground.fps = love.timer.getFPS()
-    playground.frameTime = dt
-    
-    -- Update animation
-    playground.skeleton:update(dt)
-    playground.skeleton:setBonesToSetupPose()
-    playground.skeleton:setSlotsToSetupPose()
-    playground.skeleton:setConstraintsToSetupPose()
-    playground.animationState:update(dt)
-    playground.animationState:apply(playground.skeleton)
-    
-    -- Update skeleton transforms
-    playground.skeleton:updateWorldTransform()
-    
-    -- Update skeleton position
-    -- playground.skeleton.x = playground.skeletonX
-    -- playground.skeleton.y = playground.skeletonY
-    
-    -- Handle continuous input
-    handleInput(dt)
-end
+    drawText(pass, title, panel.x - panel.w / 2 + 0.02, panel.y - 0.03, 1, 1, 1)
+    drawText(pass, count .. " total", panel.x - panel.w / 2 + 0.02, panel.y - 0.065, 0.6, 0.6, 0.6)
 
-function handleInput(dt)
-    -- Movement with arrow keys
-    local speed = 200 * dt
-    
-    if love.keyboard.isDown("left") then
-        playground.skeletonX = playground.skeletonX - speed
-    end
-    if love.keyboard.isDown("right") then
-        playground.skeletonX = playground.skeletonX + speed
-    end
-    if love.keyboard.isDown("up") then
-        playground.skeletonY = playground.skeletonY - speed
-    end
-    if love.keyboard.isDown("down") then
-        playground.skeletonY = playground.skeletonY + speed
-    end
-end
-
-function love.draw()
-    -- Show error message if assets failed to load
-    if playground.loadError then
-        love.graphics.clear(0.1, 0.1, 0.1)
-        love.graphics.setColor(1, 0.2, 0.2)
-        love.graphics.print("ERROR: Failed to load Spine assets", 50, 50)
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.print(playground.loadError, 50, 80)
-        love.graphics.print("Check console for details", 50, 110)
-        
-        -- Highlight drag-and-drop option
-        love.graphics.setColor(0.3, 0.8, 0.3)
-        love.graphics.print("✓ Drag & Drop your Spine files here!", 50, 150)
-        love.graphics.setColor(0.7, 0.7, 0.7)
-        love.graphics.print("Drop .json, .atlas, and .png files to load any character", 50, 175)
-        return
-    end
-    
-    -- Draw background
-    love.graphics.clear(playground.backgroundColor)
-    
-    -- Draw skeleton
-    local instance = {
-        skeleton = playground.skeleton,
-        renderer = playground.renderer.renderer
-    }
-    
-    spine.draw(instance, playground.skeletonX, playground.skeletonY, playground.scale, -playground.scale)
-    
-    if playground.showDebug then
-        spine.drawDebug(instance, playground.skeletonX, playground.skeletonY, playground.scale, -playground.scale)
-    end
-    
-    -- Draw UI
-    drawUI()
-end
-
-function drawUI()
-    local mouseX, mouseY = love.mouse.getPosition()
-    playground.hoveredAnimationIndex = nil
-    playground.hoveredAssetIndex = nil
-    
-    local hudWidth = 100
-    local hudHeight = 30
-    local hudX = 10
-    local hudY = love.graphics.getHeight() - hudHeight - 10
-    
-    love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", hudX, hudY, hudWidth, hudHeight, 5, 5)
-    
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.setFont(love.graphics.newFont(12))
-    local hudLabel = playground.showHud and "Hide HUD" or "Show HUD"
-    love.graphics.printf(hudLabel, hudX, hudY + 8, hudWidth, "center")
-    love.graphics.setFont(love.graphics.newFont(14))
-    
-    if not playground.showHud then
-        return
-    end
-    
-    local assetX = playground.assetListX
-    local assetY = playground.assetListY
-    local assetWidth = playground.assetListWidth
-    local assetHeight = 0
-    
-    if #playground.assetNames > 0 then
-        assetHeight = math.min(#playground.assetNames * playground.assetItemHeight + 50, 
-                               playground.assetMaxVisibleItems * playground.assetItemHeight + 50)
-        
-        love.graphics.setColor(0, 0, 0, 0.8)
-        love.graphics.rectangle("fill", assetX, assetY, assetWidth, assetHeight, 5, 5)
-        
-        love.graphics.setColor(0.2, 0.4, 0.7)
-        love.graphics.rectangle("fill", assetX, assetY, assetWidth, 40, 5, 5)
-        
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.printf("ASSETS", assetX, assetY + 10, assetWidth, "center")
-        love.graphics.setFont(love.graphics.newFont(12))
-        love.graphics.printf(#playground.assetNames .. " total", assetX, assetY + 25, assetWidth, "center")
-        love.graphics.setFont(love.graphics.newFont(14))
-        
-        local assetStartY = assetY + 50
-        local assetVisibleStart = playground.assetScrollOffset
-        local assetVisibleEnd = math.min(playground.assetScrollOffset + playground.assetMaxVisibleItems, #playground.assetNames)
-        
-        for i = assetVisibleStart + 1, assetVisibleEnd do
-            local itemY = assetStartY + (i - assetVisibleStart - 1) * playground.assetItemHeight
-            local name = playground.assetNames[i]
-            local isCurrentAsset = playground.currentAssetIndex and i == playground.currentAssetIndex
-            local isAssetHovered = mouseX >= assetX and mouseX <= assetX + assetWidth and
-                                   mouseY >= itemY and mouseY <= itemY + playground.assetItemHeight
-            
-            if isAssetHovered then
-                playground.hoveredAssetIndex = i
-            end
-            
-            if isCurrentAsset then
-                love.graphics.setColor(0.2, 0.6, 0.2, 0.5)
-                love.graphics.rectangle("fill", assetX + 5, itemY, assetWidth - 10, playground.assetItemHeight - 2)
-            elseif isAssetHovered then
-                love.graphics.setColor(0.3, 0.3, 0.4, 0.5)
-                love.graphics.rectangle("fill", assetX + 5, itemY, assetWidth - 10, playground.assetItemHeight - 2)
-            end
-            
-            local assetTextColor = isCurrentAsset and {0.3, 1, 0.3} or {0.9, 0.9, 0.9}
-            love.graphics.setColor(assetTextColor)
-            love.graphics.print(name, assetX + 15, itemY + 5)
-        end
-    end
-    
-    -- Animation list panel
-    local listX = playground.animationListX
-    local listY = playground.animationListY
-    local listWidth = playground.animationListWidth
-    local listHeight = math.min(#playground.animations * playground.animationItemHeight + 50, 
-                                 playground.maxVisibleItems * playground.animationItemHeight + 50)
-    
-    -- Panel background
-    love.graphics.setColor(0, 0, 0, 0.8)
-    love.graphics.rectangle("fill", listX, listY, listWidth, listHeight, 5, 5)
-    
-    -- Panel header
-    love.graphics.setColor(0.2, 0.4, 0.7)
-    love.graphics.rectangle("fill", listX, listY, listWidth, 40, 5, 5)
-    
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf("ANIMATIONS", listX, listY + 10, listWidth, "center")
-    love.graphics.setFont(love.graphics.newFont(12))
-    love.graphics.printf(#playground.animations .. " total", listX, listY + 25, listWidth, "center")
-    love.graphics.setFont(love.graphics.newFont(14))
-    
-    -- Animation list items
-    local startY = listY + 50
-    local visibleStart = playground.scrollOffset
-    local visibleEnd = math.min(playground.scrollOffset + playground.maxVisibleItems, #playground.animations)
-    
-    for i = visibleStart + 1, visibleEnd do
-        local itemY = startY + (i - visibleStart - 1) * playground.animationItemHeight
-        local anim = playground.animations[i]
-        local isCurrent = (i == playground.currentAnimationIndex)
-        local isHovered = mouseX >= listX and mouseX <= listX + listWidth and
-                         mouseY >= itemY and mouseY <= itemY + playground.animationItemHeight
-        
-        if isHovered then
-            playground.hoveredAnimationIndex = i
-        end
-        
-        -- Item background
+    local topY = panel.y - headerH - itemH / 2
+    for row = 1, maxVisible do
+        local i = scrollOffset + row
+        if i > count then break end
+        local y = topY - (row - 1) * itemH
+        local isCurrent = i == currentIndex
         if isCurrent then
-            love.graphics.setColor(0.2, 0.6, 0.2, 0.5)
-            love.graphics.rectangle("fill", listX + 5, itemY, listWidth - 10, playground.animationItemHeight - 2)
-        elseif isHovered then
-            love.graphics.setColor(0.3, 0.3, 0.4, 0.5)
-            love.graphics.rectangle("fill", listX + 5, itemY, listWidth - 10, playground.animationItemHeight - 2)
+            drawPanel(pass, { x = panel.x, y = y }, itemH, highlightColor[1], highlightColor[2], highlightColor[3], 0.5)
         end
-        
-        -- Item text
-        local textColor = isCurrent and {0.3, 1, 0.3} or {0.9, 0.9, 0.9}
-        love.graphics.setColor(textColor)
-        love.graphics.print(i .. ". " .. anim, listX + 15, itemY + 5)
-    end
-    
-    -- Info panel (top right)
-    local infoX = love.graphics.getWidth() - 260
-    local infoY = 10
-    local infoWidth = 250
-    
-    love.graphics.setColor(0, 0, 0, 0.7)
-    love.graphics.rectangle("fill", infoX, infoY, infoWidth, playground.showHelp and 350 or 150, 5, 5)
-    
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print("Spine Playground", infoX + 10, infoY + 10)
-    love.graphics.print("Asset: " .. (playground.currentAssetName or CONFIG.currentAsset), infoX + 10, infoY + 35)
-    love.graphics.print("Playing: " .. (playground.currentAnimation or "none"), infoX + 10, infoY + 60)
-    love.graphics.print("FPS: " .. playground.fps, infoX + 10, infoY + 85)
-    love.graphics.print("Scale: " .. string.format("%.2f", playground.scale), infoX + 10, infoY + 110)
-    
-    if playground.showHelp then
-        love.graphics.setColor(0.7, 0.7, 0.7)
-        love.graphics.print("Controls:", infoX + 10, infoY + 140)
-        love.graphics.setFont(love.graphics.newFont(12))
-        love.graphics.print("Drag files to load!", infoX + 15, infoY + 160)
-        love.graphics.print("Click animation to play", infoX + 15, infoY + 180)
-        love.graphics.print("1-9: Quick select", infoX + 15, infoY + 200)
-        love.graphics.print("Arrows: Move skeleton", infoX + 15, infoY + 220)
-        love.graphics.print("+/-: Zoom in/out", infoX + 15, infoY + 240)
-        love.graphics.print("D: Debug rendering", infoX + 15, infoY + 260)
-        love.graphics.print("R: Reset position", infoX + 15, infoY + 280)
-        love.graphics.print("H: Toggle help", infoX + 15, infoY + 300)
-        love.graphics.print("ESC: Exit", infoX + 15, infoY + 320)
-        love.graphics.setFont(love.graphics.newFont(14))
-    else
-        love.graphics.setColor(0.5, 0.5, 0.5)
-        love.graphics.print("Press H for help", infoX + 10, infoY + 130)
-    end
-    
-    -- Debug indicator
-    if playground.showDebug then
-        love.graphics.setColor(1, 0.5, 0)
-        love.graphics.print("DEBUG MODE", love.graphics.getWidth() / 2 - 50, love.graphics.getHeight() - 30)
+        local label = items[i]
+        if getExtra then label = getExtra(i, label) end
+        drawText(pass, label, panel.x - panel.w / 2 + 0.02, y - 0.012,
+            isCurrent and highlightColor[1] or 0.9,
+            isCurrent and highlightColor[2] or 0.9,
+            isCurrent and highlightColor[3] or 0.9)
     end
 end
 
-function love.keypressed(key)
-    -- Number keys for quick animation selection
+local function drawUI(pass)
+    if not playground.showHud then return end
+
+    drawListPanel(pass, HUD.assetPanel, "ASSETS", #playground.assetNames,
+        playground.assetNames, playground.currentAssetIndex, 0,
+        { 0.3, 1, 0.3 })
+
+    drawListPanel(pass, HUD.animPanel, "ANIMATIONS", #playground.animations,
+        playground.animations, playground.currentAnimationIndex, playground.scrollOffset,
+        { 0.3, 1, 0.3 }, function(i, name) return i .. ". " .. name end)
+
+    -- Info panel.
+    local lines = {
+        "Spine Playground",
+        "Asset: " .. (playground.currentAssetName or "none"),
+        "Playing: " .. (playground.currentAnimation or "none"),
+        string.format("FPS: %.0f", playground.fps),
+        string.format("Zoom: %.2f", playground.zoom),
+        string.format("Pos: %.2f, %.2f, %.2f", playground.x, playground.y, playground.z),
+    }
+    if playground.showHelp then
+        local help = {
+            "Controls:",
+            "SPACE/1-9: animation",
+            "UP/DOWN: navigate",
+            "[/]: scroll list",
+            "N/TAB: next asset",
+            "ARROWS: move skeleton",
+            "+/-: zoom",
+            "D: debug  R: reset",
+            "Y: flip  U: hud",
+            "H: help  ESC: quit",
+        }
+        for _, line in ipairs(help) do table.insert(lines, line) end
+    end
+
+    local headerH = HUD.infoPanel.headerH
+    local itemH = HUD.infoPanel.itemH
+    local totalHeight = headerH + #lines * itemH
+    drawPanel(pass, HUD.infoPanel, totalHeight, 0, 0, 0, 0.85)
+    drawPanel(pass, { x = HUD.infoPanel.x, y = HUD.infoPanel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
+    drawText(pass, "INFO", HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, HUD.infoPanel.y - 0.03, 1, 1, 1)
+
+    for i, line in ipairs(lines) do
+        local y = HUD.infoPanel.y - headerH - i * itemH + itemH / 2
+        drawText(pass, line, HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, y - 0.01,
+            i == 1 and 1 or 0.8, i == 1 and 1 or 0.8, i == 1 and 1 or 0.8)
+    end
+
+    if playground.showDebug then
+        drawText(pass, "DEBUG MODE", 0, 2.1, 1, 0.5, 0)
+    end
+end
+
+function lovr.draw(pass)
+    if playground.loadError then
+        drawText(pass, "ERROR: Failed to load Spine assets", -0.6, 0.1, 1, 0.2, 0.2)
+        drawText(pass, playground.loadError, -0.6, 0.0, 1, 1, 1)
+        drawText(pass, "Check the console for details.", -0.6, -0.1, 0.7, 0.7, 0.7)
+        return
+    end
+
+    if not playground.instance then return end
+
+    -- Draw the skeleton in world space.
+    local inst = playground.instance
+    local s = playground.zoom
+    inst.renderer.debug = playground.showDebug
+    inst.renderer:drawSkeleton(inst.skeleton, pass,
+        spine.buildTransform(playground.x, playground.y, playground.z, s, s, s, 0))
+
+    drawUI(pass)
+end
+
+function lovr.keypressed(key)
+    keysDown[key] = true
+
+    local count = #playground.animations
+
     if key >= "1" and key <= "9" then
-        local index = tonumber(key)
-        if index <= #playground.animations then
-            setAnimation(index)
-        end
-    end
-    
-    -- Navigation
-    if key == "up" and playground.currentAnimationIndex > 1 then
+        setAnimation(tonumber(key))
+    elseif key == "space" then
+        setAnimation((playground.currentAnimationIndex % count) + 1)
+    elseif key == "up" then
         setAnimation(playground.currentAnimationIndex - 1)
-    end
-    if key == "down" and playground.currentAnimationIndex < #playground.animations then
+    elseif key == "down" then
         setAnimation(playground.currentAnimationIndex + 1)
-    end
-    
-    -- Reset position
-    if key == "r" then
-        playground.skeletonX = love.graphics.getWidth() / 2
-        playground.skeletonY = love.graphics.getHeight() * 0.8
-        playground.scale = CONFIG.assets[CONFIG.currentAsset].scale or 0.5
-        print("Position and scale reset to center")
-    end
-    
-    -- Scaling
-    if key == "+" or key == "=" then
-        playground.scale = math.min(playground.scale + 0.1, 3.0)
-        print("Scale increased: " .. string.format("%.2f", playground.scale))
-    end
-    if key == "-" or key == "_" then
-        playground.scale = math.max(playground.scale - 0.1, 0.1)
-        print("Scale decreased: " .. string.format("%.2f", playground.scale))
-    end
-    
-    -- Toggles
-    if key == "d" then
+    elseif key == "[" then
+        playground.scrollOffset = math.max(0, playground.scrollOffset - 1)
+    elseif key == "]" then
+        playground.scrollOffset = math.min(
+            playground.scrollOffset + 1,
+            math.max(0, count - playground.maxVisibleItems))
+    elseif key == "n" or key == "tab" then
+        setAssetByIndex(playground.currentAssetIndex + 1)
+    elseif key == "p" then
+        setAssetByIndex(playground.currentAssetIndex - 1)
+    elseif key == "+" or key == "=" then
+        playground.zoom = math.min(playground.zoom + 0.25, 5)
+    elseif key == "-" or key == "_" then
+        playground.zoom = math.max(playground.zoom - 0.25, 0.05)
+    elseif key == "r" then
+        playground.x, playground.y, playground.z, playground.zoom = 0, 0, -3, 1
+        print("Position and zoom reset")
+    elseif key == "d" then
         playground.showDebug = not playground.showDebug
-        print("Debug rendering: " .. (playground.showDebug and "ON" or "OFF"))
+        print("Debug rendering: " .. tostring(playground.showDebug))
+    elseif key == "y" then
+        local skeleton = playground.instance and playground.instance.skeleton
+        if skeleton then
+            skeleton.flipY = not skeleton.flipY
+            skeleton:updateWorldTransform()
+            print("Flip Y: " .. tostring(skeleton.flipY))
+        end
     elseif key == "b" then
-        -- Print bone debug info
-        if playground.skeleton then
+        local skeleton = playground.instance and playground.instance.skeleton
+        if skeleton then
             local debug_bones = require("spine.debug_bones")
             print("\n--- Debug Bone Info ---")
-            debug_bones.printBoneHierarchy(playground.skeleton)
-            debug_bones.printAllBoneTransforms(playground.skeleton)
+            debug_bones.printBoneHierarchy(skeleton)
+            debug_bones.printAllBoneTransforms(skeleton)
         end
     elseif key == "h" then
         playground.showHelp = not playground.showHelp
-    elseif key == "y" then
-        if playground.skeleton then
-            playground.skeleton.flipY = not playground.skeleton.flipY
-            playground.skeleton:updateWorldTransform()
-            print("Skeleton Flip Y: " .. tostring(playground.skeleton.flipY))
-        end
-    end
-    
-    -- Exit
-    if key == "escape" then
-        love.event.quit()
+    elseif key == "u" then
+        playground.showHud = not playground.showHud
+    elseif key == "escape" then
+        lovr.event.quit()
     end
 end
 
-function love.mousepressed(x, y, button)
-    local hudWidth = 100
-    local hudHeight = 30
-    local hudX = 10
-    local hudY = love.graphics.getHeight() - hudHeight - 10
-    
-    if button == 1 then
-        if x >= hudX and x <= hudX + hudWidth and y >= hudY and y <= hudY + hudHeight then
-            playground.showHud = not playground.showHud
-            return
-        end
-        
-        if playground.showHud and playground.hoveredAssetIndex then
-            setAssetByIndex(playground.hoveredAssetIndex)
-            return
-        end
-        
-        if playground.showHud and playground.hoveredAnimationIndex then
-            setAnimation(playground.hoveredAnimationIndex)
-            return
-        end
-    elseif button == 2 then
-        playground.isDragging = true
-    end
-end
-
-function love.mousereleased(x, y, button)
-    if button == 2 then
-        playground.isDragging = false
-    end
-end
-
-function love.mousemoved(x, y, dx, dy, istouch)
-    if playground.isDragging and playground.skeleton then
-        playground.skeletonX = playground.skeletonX + dx
-        playground.skeletonY = playground.skeletonY + dy
-    end
-end
-
-function love.wheelmoved(x, y)
-    local mouseX, mouseY = love.mouse.getPosition()
-    
-    if not playground.showHud then
-        local zoomDelta = y * 0.1
-        playground.scale = math.max(0.1, math.min(3.0, playground.scale + zoomDelta))
-        return
-    end
-    
-    local assetX = playground.assetListX
-    local assetWidth = playground.assetListWidth
-    
-    if mouseX >= assetX and mouseX <= assetX + assetWidth then
-        playground.assetScrollOffset = math.max(0, math.min(
-            playground.assetScrollOffset - y,
-            math.max(0, #playground.assetNames - playground.assetMaxVisibleItems)
-        ))
-        return
-    end
-    
-    local listX = playground.animationListX
-    local listWidth = playground.animationListWidth
-    
-    if mouseX >= listX and mouseX <= listX + listWidth then
-        playground.scrollOffset = math.max(0, math.min(
-            playground.scrollOffset - y,
-            math.max(0, #playground.animations - playground.maxVisibleItems)
-        ))
-        return
-    end
-    
-    local zoomDelta = y * 0.1
-    playground.scale = math.max(0.1, math.min(3.0, playground.scale + zoomDelta))
-end
-
-function love.resize(w, h)
-    print("Window resized to: " .. w .. "x" .. h)
-    -- Re-center skeleton on resize
-    playground.skeletonX = w / 2
-    playground.skeletonY = h * 0.8
-end
-
-function love.filedropped(file)
-    local filename = file:getFilename()
-    local ext = filename:match("%.([^%.]+)$")
-    
-    print("File dropped: " .. filename)
-    
-    -- Accept only spine-related files
-    if ext == "json" or ext == "atlas" or ext == "png" then
-        -- Store the file object (not just filename)
-        if not playground.droppedFiles[ext] then
-            playground.droppedFiles[ext] = {}
-        end
-        
-        table.insert(playground.droppedFiles[ext], file)
-        
-        print("Stored " .. ext .. " file: " .. filename)
-        
-        -- Check if we have at least one atlas and one json (png is optional)
-        if playground.droppedFiles.atlas and #playground.droppedFiles.atlas > 0 
-           and playground.droppedFiles.json and #playground.droppedFiles.json > 0 then
-            
-            -- Use the first atlas and first json file objects
-            local atlasFileObj = playground.droppedFiles.atlas[1]
-            local jsonFileObj = playground.droppedFiles.json[1]
-            
-            -- Read the file contents directly
-            local atlasContent = atlasFileObj:read()
-            local jsonContent = jsonFileObj:read()
-            
-            -- Extract filenames
-            local atlasFilename = atlasFileObj:getFilename()
-            local jsonFilename = jsonFileObj:getFilename()
-            local displayName = atlasFilename:match("([^/\\\\]+)%.atlas$") or jsonFilename:match("([^/\\\\]+)%.json$") or "custom"
-            
-            -- Create temporary directory for dropped files
-            local tempDir = "dropped_files/"
-            love.filesystem.createDirectory(tempDir)
-            
-            -- Write atlas and json to temp directory
-            local tempAtlasPath = tempDir .. atlasFilename:match("([^/\\\\]+)$")
-            local tempJsonPath = tempDir .. jsonFilename:match("([^/\\\\]+)$")
-            
-            love.filesystem.write(tempAtlasPath, atlasContent)
-            love.filesystem.write(tempJsonPath, jsonContent)
-            
-            print("Wrote atlas to: " .. tempAtlasPath)
-            print("Wrote json to: " .. tempJsonPath)
-            
-            -- Also write PNG if available
-            if playground.droppedFiles.png and #playground.droppedFiles.png > 0 then
-                local pngFileObj = playground.droppedFiles.png[1]
-                local pngContent = pngFileObj:read()
-                local pngFilename = pngFileObj:getFilename()
-                local tempPngPath = tempDir .. pngFilename:match("([^/\\\\]+)$")
-                love.filesystem.write(tempPngPath, pngContent)
-                print("Wrote png to: " .. tempPngPath)
-            end
-            
-            print("Complete set detected!")
-            print("  Using atlas: " .. atlasFilename)
-            print("  Using json: " .. jsonFilename)
-            
-            -- Now load from the temporary directory using regular filesystem paths
-            local customAsset = {
-                atlas = tempAtlasPath,
-                json = tempJsonPath,
-                scale = 0.5,
-                x = love.graphics.getWidth() / 2,
-                y = love.graphics.getHeight() * 0.8
-            }
-            
-            -- Load without fileContents parameter, so it reads from filesystem
-            local success, err = loadSpineAsset(displayName, customAsset)
-            if success then
-                playground.loadError = nil
-                print("Successfully loaded dropped files!")
-                print("Found " .. #playground.animations .. " animations")
-                
-                -- Clear dropped files after successful load
-                playground.droppedFiles = {}
-            else
-                playground.loadError = "Failed to load dropped files: " .. (err or "unknown error")
-                print(playground.loadError)
-            end
-        else
-            -- Show what's missing
-            local hasAtlas = playground.droppedFiles.atlas and #playground.droppedFiles.atlas > 0
-            local hasJson = playground.droppedFiles.json and #playground.droppedFiles.json > 0
-            
-            print("Waiting for more files...")
-            if not hasAtlas then print("  Missing: .atlas file") end
-            if not hasJson then print("  Missing: .json file") end
-            if hasAtlas and hasJson then
-                print("  Ready to load!")
-            end
-        end
-    else
-        print("Ignored file with extension: " .. (ext or "none"))
-    end
-end
-
-function love.directorydropped(path)
-    print("Directory dropped: " .. path)
-    print("Please drop individual files (.json, .atlas, .png) instead")
-end
-
-function setupMixAndMatch(skeleton, skeletonData)
-    print("Applying Mix and Match skins...")
-    
-    -- Try to load the full skin
-    local skinName = "full-skins/girl"
-    -- You can also try: "full-skins/boy", "full-skins/girl-blue-cape", "full-skins/girl-spring-dress"
-    
-    if skeletonData.skins[skinName] then
-        print("Setting skin: " .. skinName)
-        skeleton:setSkin(skinName)
-    else
-        print("Error: Skin '" .. skinName .. "' not found!")
-        -- List available skins for debugging
-        print("Available skins:")
-        for name, _ in pairs(skeletonData.skins) do
-            print("- " .. name)
-        end
-        
-        -- Fallback to base
-        if skeletonData.skins["skin-base"] then
-            print("Falling back to 'skin-base'")
-            skeleton:setSkin("skin-base")
-        end
-    end
+function lovr.keyreleased(key)
+    keysDown[key] = nil
 end
