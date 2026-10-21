@@ -18,7 +18,7 @@ lovr .
 - **Keyboard Driven UI**: 1-9 or Up/Down to select animations, Tab/N to switch
   assets, arrows to move the skeleton, +/- to zoom.
 - **Smooth Transitions**: All animation switches crossfade over 0.2s.
-- **Debug Rendering**: Press D to draw bones, slots, and attachment bounds.
+- **Debug Rendering**: Press F to draw bones, slots, and attachment bounds.
 - **Mix & Match**: The `mix_and_match` asset auto-applies the
   `full-skins/girl` skin.
 
@@ -34,7 +34,7 @@ lovr .
 | `P`            | Previous asset                          |
 | `Arrow keys`   | Move the skeleton (hold)                |
 | `+` / `-`      | Zoom in / out                           |
-| `D`            | Toggle debug rendering                  |
+| `F`            | Toggle debug rendering (D is strafe)    |
 | `Y`            | Flip the skeleton vertically            |
 | `B`            | Print bone hierarchy/transforms to console |
 | `R`            | Reset position and zoom                 |

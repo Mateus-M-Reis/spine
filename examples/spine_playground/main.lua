@@ -375,18 +375,23 @@ function lovr.update(dt)
     if isDown("down") then playground.y = playground.y - speed end
 end
 
-local function drawPanel(pass, panel, totalHeight, r, g, b, a)
-    -- Some builds apply pass:setColor one draw late; call it twice so the
-    -- box gets the intended color.
+-- Draws a flat, filled rectangle facing the viewer (no 3D box).
+local function drawRect(pass, cx, cy, w, h, r, g, b, a)
+    local x0, x1 = cx - w / 2, cx + w / 2
+    local y0, y1 = cy - h / 2, cy + h / 2
+    -- Some builds apply pass:setColor one draw late; call it twice.
     pass:setColor(r, g, b, a or 1)
     pass:setColor(r, g, b, a or 1)
-    -- LÖVR 0.18 uses box(mode, ...); some builds use box(...) with no mode.
-    -- Try the no-mode form first: on some builds a failed mode-form call
-    -- breaks later draws.
-    local ok = pcall(pass.box, pass, panel.x, panel.y - totalHeight / 2, 0, panel.w, totalHeight, 0.01)
+    -- Flat polygon first (some builds have no mode argument), then the
+    -- LÖVR 0.18 form with an explicit mode.
+    local ok = pcall(pass.polygon, pass, x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0)
     if not ok then
-        pcall(pass.box, pass, "fill", panel.x, panel.y - totalHeight / 2, 0, panel.w, totalHeight, 0.01)
+        pcall(pass.polygon, pass, "fill", { x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0 })
     end
+end
+
+local function drawPanel(pass, panel, totalHeight, r, g, b, a)
+    drawRect(pass, panel.x, panel.y - totalHeight / 2, panel.w, totalHeight, r, g, b, a)
 end
 
 local function drawText(pass, str, x, y, r, g, b)
@@ -400,7 +405,7 @@ local function drawListPanel(pass, panel, title, count, items, currentIndex, scr
     local totalHeight = headerH + maxVisible * itemH
 
     drawPanel(pass, panel, totalHeight, 0.85, 0.85, 0.9, 1)
-    drawPanel(pass, { x = panel.x, y = panel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
+    drawPanel(pass, { x = panel.x, y = panel.y - headerH / 2, w = panel.w }, headerH, 0.15, 0.3, 0.55, 1)
 
     drawText(pass, title, panel.x - panel.w / 2 + 0.02, panel.y - 0.038, 1, 1, 1)
     drawText(pass, count .. " total", panel.x - panel.w / 2 + 0.02, panel.y - 0.078, 0.75, 0.75, 0.85)
@@ -412,7 +417,7 @@ local function drawListPanel(pass, panel, title, count, items, currentIndex, scr
         local y = topY - (row - 1) * itemH
         local isCurrent = i == currentIndex
         if isCurrent then
-            drawPanel(pass, { x = panel.x, y = y }, itemH, highlightColor[1], highlightColor[2], highlightColor[3], 1)
+            drawPanel(pass, { x = panel.x, y = y, w = panel.w }, itemH, highlightColor[1], highlightColor[2], highlightColor[3], 1)
         end
         local label = items[i]
         if getExtra then label = getExtra(i, label) end
@@ -453,7 +458,7 @@ local function drawUI(pass)
             "N/TAB: asset",
             "ARROWS: move",
             "+/-: zoom",
-            "D debug  R reset",
+            "F debug  R reset",
             "Y flip  U/H hide",
         }
         for _, line in ipairs(help) do table.insert(lines, line) end
@@ -463,7 +468,7 @@ local function drawUI(pass)
     local itemH = HUD.infoPanel.itemH
     local totalHeight = headerH + #lines * itemH
     drawPanel(pass, HUD.infoPanel, totalHeight, 0.85, 0.85, 0.9, 1)
-    drawPanel(pass, { x = HUD.infoPanel.x, y = HUD.infoPanel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
+    drawPanel(pass, { x = HUD.infoPanel.x, y = HUD.infoPanel.y - headerH / 2, w = HUD.infoPanel.w }, headerH, 0.15, 0.3, 0.55, 1)
     drawText(pass, "INFO", HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, HUD.infoPanel.y - 0.03, 1, 1, 1)
 
     for i, line in ipairs(lines) do
@@ -530,7 +535,8 @@ function lovr.keypressed(key)
     elseif key == "r" then
         playground.x, playground.y, playground.z, playground.zoom = 0, 0, -3, 1
         print("Position and zoom reset")
-    elseif key == "d" then
+    elseif key == "f" then
+        -- NOTE: "d" is the desktop freelook strafe key, so debug is on "f".
         playground.showDebug = not playground.showDebug
         print("Debug rendering: " .. tostring(playground.showDebug))
     elseif key == "y" then

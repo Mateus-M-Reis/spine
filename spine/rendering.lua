@@ -245,17 +245,18 @@ function Renderer:getMaterial(texture)
 	return material
 end
 
--- Get (or create) a growable Buffer/Mesh pair for a texture page. Batches for
--- the same texture reuse the buffer across frames and instances of the
--- renderer; it is recreated only when the batch outgrows it.
-function Renderer:getBatchMesh(texture, vertexCount)
+-- Get (or create) a growable Buffer/Mesh pair for one batch group. Each
+-- group needs its OWN buffer: LÖVR records draws and executes them later, so
+-- overwriting a shared buffer between recorded draws would make every group
+-- render the last group's vertices (garbage triangles).
+function Renderer:getBatchMesh(groupKey, vertexCount)
 	if not self.batchMeshes then
-		self.batchMeshes = setmetatable({}, { __mode = "k" })
+		self.batchMeshes = {}
 	end
-	local info = self.batchMeshes[texture]
+	local info = self.batchMeshes[groupKey]
 	if not info then
 		info = { capacity = 0 }
-		self.batchMeshes[texture] = info
+		self.batchMeshes[groupKey] = info
 	end
 	if info.capacity < vertexCount then
 		local capacity = math.max(vertexCount, info.capacity * 2, 256)
@@ -315,6 +316,7 @@ function Renderer:collectAttachment(batch, slot, attachment)
 	local group = batch.groups[key]
 	if not group then
 		group = {
+			key = key,
 			texture = region.texture,
 			blendMode = blendMode,
 			pma = pma,
@@ -388,7 +390,7 @@ function Renderer:flushBatches(batch, pass)
 			break
 		end
 
-		local meshInfo = self:getBatchMesh(group.texture, #group.vertices)
+		local meshInfo = self:getBatchMesh(group.key, #group.vertices)
 		if not meshInfo or not meshInfo.mesh then
 			self.vertexCount = self.vertexCount + #group.vertices
 			self.triangleCount = self.triangleCount + #group.indices / 3
