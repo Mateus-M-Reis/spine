@@ -66,8 +66,11 @@ To add your own character, place its `.json`, `.atlas`, and `.png` files in
 
 ## Notes
 
-- The skeleton is drawn in 3D world space at `(0, 0, -3)`; the HUD panels float
-  in front of the desktop camera at `z = -1.4`.
+- The skeleton is drawn in 3D world space at `(0, 0, -3)`; the HUD panels are
+  anchored to the camera, 2m in front of it, so they follow the view and always
+  face you.
+- The HUD text uses a small built-in bitmap font, because `pass:text` does not
+  render on some LÖVR builds.
 - Drag & drop file loading is not supported in this port; use `CONFIG` instead.
 - The demo uses the high-level `spine.loadSkeleton` API, so it doubles as an
   example of the quick-start workflow.

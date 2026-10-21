@@ -60,19 +60,182 @@ local playground = {
     itemHeight = 0.045,
 }
 
--- HUD layout (world space, meters). Panels float in front of the desktop
--- camera at z = -1.4.
+-- HUD layout. Panels are drawn in a camera-anchored local space (x = right,
+-- y = up, z = toward the viewer) 1.2m in front of the head, so the UI follows
+-- the camera and always faces the user. Sizes are in meters at that distance.
 local HUD = {
-    z = -1.4,
-    textScale = 0.0035,
-    assetPanel = { x = -1.05, y = 1.75, w = 0.5, headerH = 0.09, itemH = 0.04 },
-    animPanel  = { x = -0.45, y = 1.75, w = 0.55, headerH = 0.09, itemH = 0.04 },
-    infoPanel  = { x = 0.25,  y = 1.75, w = 0.55, headerH = 0.09, itemH = 0.04 },
+    distance = 2.0,
+    textScale = 0.06, -- text height in meters (bitmap font)
+    assetPanel = { x = -0.68, y = 0.45, w = 0.65, headerH = 0.09, itemH = 0.045 },
+    animPanel  = { x = 0.68,  y = 0.45, w = 0.65, headerH = 0.09, itemH = 0.045 },
+    infoPanel  = { x = -0.68, y = -0.45, w = 0.65, headerH = 0.065, itemH = 0.04 },
 }
+
+-- Head pose (position + quaternion), with a safe fallback for builds without
+-- a headset module.
+local function getHeadPose()
+    if lovr.headset and lovr.headset.getPose then
+        local ok, x, y, z, qx, qy, qz, qw = pcall(lovr.headset.getPose)
+        if ok and x then
+            return x, y, z, qx, qy, qz, qw
+        end
+    end
+    return 0, 0, 0, 0, 0, 0, 1
+end
+
+-- Builds a Mat4 that maps HUD-local coordinates to world space, anchored
+-- 1.2m in front of the head and oriented with the head. Panels/text drawn in
+-- this space face the user.
+local function getHudTransform()
+    local hx, hy, hz, qx, qy, qz, qw = getHeadPose()
+
+    local len = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    if len > 0 then
+        qx, qy, qz, qw = qx / len, qy / len, qz / len, qw / len
+    end
+
+    -- Forward direction of the head (rotate (0, 0, -1) by the quaternion).
+    local fx = -2 * (qx * qz - qw * qy)
+    local fy = -2 * (qy * qz + qw * qx)
+    local fz = -1 + 2 * (qx * qx + qy * qy)
+
+    local ox = hx + fx * HUD.distance
+    local oy = hy + fy * HUD.distance
+    local oz = hz + fz * HUD.distance
+
+    local mat = lovr.math.newMat4()
+    local ok = pcall(function()
+        mat:setOrientation(qx, qy, qz, qw)
+    end)
+    if not ok then
+        -- Build without setOrientation (keeps the panels axis-aligned).
+    end
+    mat:translate(ox, oy, oz)
+    return mat
+end
 
 local keysDown = {}
 local function isDown(key)
     return keysDown[key] == true
+end
+
+----------------------------------------------------------------------------
+-- Tiny 5x7 bitmap font, drawn with colored quads through the mesh pipeline.
+-- Some LÖVR builds cannot render pass:text at all, so the HUD uses its own
+-- font. Each glyph row is a 5-character string of '#' and '.' (left to right).
+
+local FONT_GLYPHS = {
+    ["A"] = ".##.." .. "#..#." .. "#..#." .. "#####" .. "#..#." .. "#..#." .. "#..#.",
+    ["B"] = "####." .. "#..#." .. "#..#." .. "####." .. "#..#." .. "#..#." .. "####.",
+    ["C"] = ".##.." .. "#..#." .. "#...." .. "#...." .. "#...." .. "#..#." .. ".##..",
+    ["D"] = "####." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. "####.",
+    ["E"] = "#####" .. "#...." .. "#...." .. "####." .. "#...." .. "#...." .. "#####",
+    ["F"] = "#####" .. "#...." .. "#...." .. "####." .. "#...." .. "#...." .. "#....",
+    ["G"] = ".##.." .. "#..#." .. "#...." .. "#.###" .. "#..#." .. "#..#." .. ".###.",
+    ["H"] = "#..#." .. "#..#." .. "#..#." .. "#####" .. "#..#." .. "#..#." .. "#..#.",
+    ["I"] = "#####" .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. "#####",
+    ["J"] = "..###" .. "...#." .. "...#." .. "...#." .. "...#." .. "#..#." .. ".##..",
+    ["K"] = "#..#." .. "#.#.." .. "##..." .. "##..." .. "#.#.." .. "#..#." .. "#..#.",
+    ["L"] = "#...." .. "#...." .. "#...." .. "#...." .. "#...." .. "#...." .. "#####",
+    ["M"] = "#...#" .. "##.##" .. "#.#.#" .. "#.#.#" .. "#...#" .. "#...#" .. "#...#",
+    ["N"] = "#...#" .. "##..#" .. "#.#.#" .. "#..##" .. "#...#" .. "#...#" .. "#...#",
+    ["O"] = ".##.." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. ".##..",
+    ["P"] = "####." .. "#..#." .. "#..#." .. "####." .. "#...." .. "#...." .. "#....",
+    ["Q"] = ".##.." .. "#..#." .. "#..#." .. "#..#." .. "#.#.#" .. "#..#." .. ".##.#",
+    ["R"] = "####." .. "#..#." .. "#..#." .. "####." .. "#.#.." .. "#..#." .. "#..#.",
+    ["S"] = ".####" .. "#...." .. "#...." .. ".###." .. "....#" .. "....#" .. "####.",
+    ["T"] = "#####" .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. "..#..",
+    ["U"] = "#..#." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. ".##..",
+    ["V"] = "#..#." .. "#..#." .. "#..#." .. "#..#." .. "#..#." .. ".#.#." .. "..#..",
+    ["W"] = "#...#" .. "#...#" .. "#...#" .. "#.#.#" .. "#.#.#" .. "##.##" .. "#...#",
+    ["X"] = "#..#." .. "#..#." .. ".#.#." .. "..#.." .. ".#.#." .. "#..#." .. "#..#.",
+    ["Y"] = "#..#." .. "#..#." .. ".#.#." .. "..#.." .. "..#.." .. "..#.." .. "..#..",
+    ["Z"] = "#####" .. "....#" .. "...#." .. "..#.." .. ".#..." .. "#...." .. "#####",
+    ["0"] = ".##.." .. "#..#." .. "#..##" .. "#.#.#" .. "##..#" .. "#..#." .. ".##..",
+    ["1"] = "..#.." .. ".##.." .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. ".###.",
+    ["2"] = ".##.." .. "#..#." .. "....#" .. "...#." .. "..#.." .. ".#..." .. "#####",
+    ["3"] = "####." .. "....#" .. "....#" .. ".###." .. "....#" .. "....#" .. "####.",
+    ["4"] = "...#." .. "..##." .. ".#.#." .. "#..#." .. "#####" .. "...#." .. "...#.",
+    ["5"] = "#####" .. "#...." .. "#...." .. "####." .. "....#" .. "....#" .. "####.",
+    ["6"] = ".##.." .. "#...." .. "#...." .. "####." .. "#..#." .. "#..#." .. ".##..",
+    ["7"] = "#####" .. "....#" .. "...#." .. "..#.." .. ".#..." .. ".#..." .. ".#...",
+    ["8"] = ".##.." .. "#..#." .. "#..#." .. ".##.." .. "#..#." .. "#..#." .. ".##..",
+    ["9"] = ".##.." .. "#..#." .. "#..#." .. ".###." .. "....#" .. "....#" .. ".##..",
+    [" "] = "....." .. "....." .. "....." .. "....." .. "....." .. "....." .. ".....",
+    ["-"] = "....." .. "....." .. "....." .. "#####" .. "....." .. "....." .. ".....",
+    [":"] = "....." .. ".##.." .. ".##.." .. "....." .. ".##.." .. ".##.." .. ".....",
+    ["/"] = "....#" .. "...#." .. "...#." .. "..#.." .. ".#..." .. ".#..." .. "#....",
+    ["+"] = "....." .. "..#.." .. "..#.." .. "#####" .. "..#.." .. "..#.." .. ".....",
+    ["."] = "....." .. "....." .. "....." .. "....." .. "....." .. ".##.." .. ".##..",
+    ["("] = "..#.." .. ".#..." .. "#...." .. "#...." .. "#...." .. ".#..." .. "..#..",
+    [")"] = "..#.." .. "...#." .. "....#" .. "....#" .. "....#" .. "...#." .. "..#..",
+    ["["] = ".###." .. ".#..." .. ".#..." .. ".#..." .. ".#..." .. ".#..." .. ".###.",
+    ["]"] = ".###." .. "...#." .. "...#." .. "...#." .. "...#." .. "...#." .. ".###.",
+    ["?"] = ".##.." .. "#..#." .. "....#" .. "...#." .. "..#.." .. "....." .. "..#..",
+    ["!"] = "..#.." .. "..#.." .. "..#.." .. "..#.." .. "..#.." .. "....." .. "..#..",
+    ["%"] = "##..#" .. "##..#" .. "...#." .. "..#.." .. ".#..." .. "#..##" .. "#..##",
+    ["'"] = "..#.." .. "..#.." .. "....." .. "....." .. "....." .. "....." .. ".....",
+    ['"'] = ".#.#." .. ".#.#." .. "....." .. "....." .. "....." .. "....." .. ".....",
+    ["="] = "....." .. "....." .. "#####" .. "....." .. "#####" .. "....." .. ".....",
+    ["_"] = "....." .. "....." .. "....." .. "....." .. "....." .. "....." .. "#####",
+    [","] = "....." .. "....." .. "....." .. "....." .. ".##.." .. "..#.." .. ".#...",
+}
+
+-- Precomputed pixel offsets per glyph.
+local FONT_PIXELS = {}
+for ch, glyph in pairs(FONT_GLYPHS) do
+    local pixels = {}
+    for row = 1, 7 do
+        local line = glyph:sub((row - 1) * 5 + 1, row * 5)
+        for col = 1, 5 do
+            if line:sub(col, col) == "#" then
+                table.insert(pixels, { col - 1, row - 1 })
+            end
+        end
+    end
+    FONT_PIXELS[ch] = pixels
+end
+
+-- UI text collected each frame and drawn with small colored boxes. Boxes are
+-- used because they render reliably across LÖVR builds (unlike text/meshes on
+-- some versions).
+local uiTextCmds = {}
+local uiTextCount = 0
+
+local function uiTextReset()
+    uiTextCount = 0
+    for i = #uiTextCmds, 1, -1 do
+        uiTextCmds[i] = nil
+    end
+end
+
+local function uiTextAdd(str, x, y, z, scale, r, g, b, a)
+    uiTextCount = uiTextCount + 1
+    uiTextCmds[uiTextCount] = { str, x, y, z, scale, r, g, b, a }
+end
+
+local function uiTextFlush(pass)
+    if uiTextCount == 0 then return end
+    for i = 1, uiTextCount do
+        local cmd = uiTextCmds[i]
+        local str, x, y, z, scale, r, g, b, a = cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]
+        local cell = scale / 7
+        pass:setColor(r, g, b, a)
+        pass:setColor(r, g, b, a)
+        for c = 1, #str do
+            local pixels = FONT_PIXELS[str:sub(c, c)] or FONT_PIXELS["?"]
+            local cx = x + (c - 1) * cell * 6
+            for _, px in ipairs(pixels) do
+                local bx = cx + (px[1] + 0.5) * cell
+                local by = y - (px[2] + 0.5) * cell
+                local ok = pcall(pass.box, pass, bx, by, z, cell, cell, 0.005)
+                if not ok then
+                    pcall(pass.box, pass, bx, by, z, cell, cell, 0.005)
+                end
+            end
+        end
+    end
+    uiTextReset()
 end
 
 ---------------------------------------------------------------------------
@@ -213,17 +376,21 @@ function lovr.update(dt)
 end
 
 local function drawPanel(pass, panel, totalHeight, r, g, b, a)
-    pass:setColor(r, g, b, a or 0.8)
+    -- Some builds apply pass:setColor one draw late; call it twice so the
+    -- box gets the intended color.
+    pass:setColor(r, g, b, a or 1)
+    pass:setColor(r, g, b, a or 1)
     -- LÖVR 0.18 uses box(mode, ...); some builds use box(...) with no mode.
-    local ok = pcall(pass.box, pass, "fill", panel.x, panel.y - totalHeight / 2, HUD.z, panel.w, totalHeight, 0.01)
+    -- Try the no-mode form first: on some builds a failed mode-form call
+    -- breaks later draws.
+    local ok = pcall(pass.box, pass, panel.x, panel.y - totalHeight / 2, 0, panel.w, totalHeight, 0.01)
     if not ok then
-        pcall(pass.box, pass, panel.x, panel.y - totalHeight / 2, HUD.z, panel.w, totalHeight, 0.01)
+        pcall(pass.box, pass, "fill", panel.x, panel.y - totalHeight / 2, 0, panel.w, totalHeight, 0.01)
     end
 end
 
 local function drawText(pass, str, x, y, r, g, b)
-    pass:setColor(r or 1, g or 1, b or 1)
-    pass:text(str, x, y, HUD.z + 0.011, HUD.textScale)
+    uiTextAdd(str, x, y, 0.012, HUD.textScale, r or 1, g or 1, b or 1, 1)
 end
 
 local function drawListPanel(pass, panel, title, count, items, currentIndex, scrollOffset, highlightColor, getExtra)
@@ -232,11 +399,11 @@ local function drawListPanel(pass, panel, title, count, items, currentIndex, scr
     local itemH = panel.itemH
     local totalHeight = headerH + maxVisible * itemH
 
-    drawPanel(pass, panel, totalHeight, 0, 0, 0, 0.85)
+    drawPanel(pass, panel, totalHeight, 0.85, 0.85, 0.9, 1)
     drawPanel(pass, { x = panel.x, y = panel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
 
-    drawText(pass, title, panel.x - panel.w / 2 + 0.02, panel.y - 0.03, 1, 1, 1)
-    drawText(pass, count .. " total", panel.x - panel.w / 2 + 0.02, panel.y - 0.065, 0.6, 0.6, 0.6)
+    drawText(pass, title, panel.x - panel.w / 2 + 0.02, panel.y - 0.038, 1, 1, 1)
+    drawText(pass, count .. " total", panel.x - panel.w / 2 + 0.02, panel.y - 0.078, 0.75, 0.75, 0.85)
 
     local topY = panel.y - headerH - itemH / 2
     for row = 1, maxVisible do
@@ -245,49 +412,49 @@ local function drawListPanel(pass, panel, title, count, items, currentIndex, scr
         local y = topY - (row - 1) * itemH
         local isCurrent = i == currentIndex
         if isCurrent then
-            drawPanel(pass, { x = panel.x, y = y }, itemH, highlightColor[1], highlightColor[2], highlightColor[3], 0.5)
+            drawPanel(pass, { x = panel.x, y = y }, itemH, highlightColor[1], highlightColor[2], highlightColor[3], 1)
         end
         local label = items[i]
         if getExtra then label = getExtra(i, label) end
-        drawText(pass, label, panel.x - panel.w / 2 + 0.02, y - 0.012,
-            isCurrent and highlightColor[1] or 0.9,
-            isCurrent and highlightColor[2] or 0.9,
-            isCurrent and highlightColor[3] or 0.9)
+        drawText(pass, label, panel.x - panel.w / 2 + 0.02, y - 0.02,
+            isCurrent and 1.0 or 1.0,
+            isCurrent and 1.0 or 1.0,
+            isCurrent and 0.9 or 1.0)
     end
 end
 
 local function drawUI(pass)
     if not playground.showHud then return end
 
-    drawListPanel(pass, HUD.assetPanel, "ASSETS", #playground.assetNames,
+    -- Anchor the HUD to the camera so panels always face the user.
+    pass:push()
+    pass:transform(getHudTransform())
+
+    -- Reserve nothing: panels draw first, then text (see below).
+
+    drawListPanel(pass, HUD.assetPanel, "ASSETS (N/TAB)", #playground.assetNames,
         playground.assetNames, playground.currentAssetIndex, 0,
         { 0.3, 1, 0.3 })
 
-    drawListPanel(pass, HUD.animPanel, "ANIMATIONS", #playground.animations,
+    drawListPanel(pass, HUD.animPanel, "ANIMS (1-9)", #playground.animations,
         playground.animations, playground.currentAnimationIndex, playground.scrollOffset,
         { 0.3, 1, 0.3 }, function(i, name) return i .. ". " .. name end)
 
     -- Info panel.
     local lines = {
-        "Spine Playground",
         "Asset: " .. (playground.currentAssetName or "none"),
         "Playing: " .. (playground.currentAnimation or "none"),
-        string.format("FPS: %.0f", playground.fps),
-        string.format("Zoom: %.2f", playground.zoom),
-        string.format("Pos: %.2f, %.2f, %.2f", playground.x, playground.y, playground.z),
+        string.format("FPS: %.0f  Zoom: %.2f", playground.fps, playground.zoom),
     }
     if playground.showHelp then
         local help = {
-            "Controls:",
-            "SPACE/1-9: animation",
-            "UP/DOWN: navigate",
-            "[/]: scroll list",
-            "N/TAB: next asset",
-            "ARROWS: move skeleton",
+            "KEYS: 1-9 anim",
+            "[/]: scroll",
+            "N/TAB: asset",
+            "ARROWS: move",
             "+/-: zoom",
-            "D: debug  R: reset",
-            "Y: flip  U: hud",
-            "H: help  ESC: quit",
+            "D debug  R reset",
+            "Y flip  U/H hide",
         }
         for _, line in ipairs(help) do table.insert(lines, line) end
     end
@@ -295,26 +462,29 @@ local function drawUI(pass)
     local headerH = HUD.infoPanel.headerH
     local itemH = HUD.infoPanel.itemH
     local totalHeight = headerH + #lines * itemH
-    drawPanel(pass, HUD.infoPanel, totalHeight, 0, 0, 0, 0.85)
+    drawPanel(pass, HUD.infoPanel, totalHeight, 0.85, 0.85, 0.9, 1)
     drawPanel(pass, { x = HUD.infoPanel.x, y = HUD.infoPanel.y - headerH / 2 }, headerH, 0.15, 0.3, 0.55, 1)
     drawText(pass, "INFO", HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, HUD.infoPanel.y - 0.03, 1, 1, 1)
 
     for i, line in ipairs(lines) do
         local y = HUD.infoPanel.y - headerH - i * itemH + itemH / 2
-        drawText(pass, line, HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, y - 0.01,
-            i == 1 and 1 or 0.8, i == 1 and 1 or 0.8, i == 1 and 1 or 0.8)
+        drawText(pass, line, HUD.infoPanel.x - HUD.infoPanel.w / 2 + 0.02, y - 0.013,
+            1, 1, 1)
     end
 
-    if playground.showDebug then
-        drawText(pass, "DEBUG MODE", 0, 2.1, 1, 0.5, 0)
-    end
+    -- Flush all collected text quads as one mesh.
+    uiTextFlush(pass)
+
+    pass:pop()
 end
 
 function lovr.draw(pass)
     if playground.loadError then
-        drawText(pass, "ERROR: Failed to load Spine assets", -0.6, 0.1, 1, 0.2, 0.2)
-        drawText(pass, playground.loadError, -0.6, 0.0, 1, 1, 1)
-        drawText(pass, "Check the console for details.", -0.6, -0.1, 0.7, 0.7, 0.7)
+        uiTextReset()
+        uiTextAdd("ERROR: Failed to load Spine assets", -0.5, 0.15, -1.2, 0.05, 1, 0.2, 0.2, 1)
+        uiTextAdd(playground.loadError, -0.5, 0.05, -1.2, 0.04, 1, 1, 1, 1)
+        uiTextAdd("Check the console for details.", -0.5, -0.05, -1.2, 0.04, 0.7, 0.7, 0.7, 1)
+        uiTextFlush(pass)
         return
     end
 
