@@ -13,7 +13,7 @@ A complete Spine skeletal animation runtime for LÖVR, implementing the Spine an
 - **Animation**: Timeline-based animations with crossfade mixing, multi-track layering (track alpha and mixBlend), draw-order timelines, and events (listener API).
 - **Colors**: Skeleton, slot, and attachment tints are multiplied for every rendered attachment, including PMA and tint-black (dark color) shading.
 - **Constraints**: IK, Transform, Path, and Physics constraints.
-- **Skins**: Runtime skin switching.
+- **Skins**: Runtime skin switching, including skin-required bones and constraints.
 - **3D Positioning**: Place skeletons anywhere in 3D space with full transform control.
 - **Stencil Clipping**: Hardware-accelerated clipping attachments, including nested clips.
 - **Custom Shaders**: Tint-black dual-color tinting (per-vertex dark color) and multiply blend mode shaders.
@@ -191,10 +191,12 @@ The suite covers high-level loading (atlas binding, setup pose), asset caching
 raw-text atlas loading, skeleton time advancement, batched rendering call
 counts, material caching, draw-order preservation across batch-state changes
 and clipping, skeleton/slot/attachment color multiplication, deform offset
-scaling, bounding-box parsing, skeleton scale, physics reference units, stencil
-clipping (including the no-stencil fallback), draw-order timelines, animation
-crossfades, track layering, event dispatch (including time-zero events), Spine
-4.2 sequences, and queued animations.
+scaling, bounding-box parsing, skeleton scale, physics reference units and
+global physics timelines, trimmed/rotated mesh UVs, stencil clipping (including
+concave-polygon triangulation and the no-stencil fallback), draw-order
+timelines, skin-required bones/constraints, animation crossfades, track
+layering, event dispatch (including time-zero events), Spine 4.2 sequences, and
+queued animations.
 
 ## Requirements
 

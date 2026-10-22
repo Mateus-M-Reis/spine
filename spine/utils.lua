@@ -752,6 +752,19 @@ function utils.triangulate(vertices)
     return (d1 > 0 and d2 > 0 and d3 > 0) or (d1 < 0 and d2 < 0 and d3 < 0)
   end
 
+  local function pointOnSegment(pt, p1, p2)
+    if math.abs(sign(p1, p2, pt)) > 1e-9 then return false end
+    return pt.x >= math.min(p1.x, p2.x) - 1e-9
+      and pt.x <= math.max(p1.x, p2.x) + 1e-9
+      and pt.y >= math.min(p1.y, p2.y) - 1e-9
+      and pt.y <= math.max(p1.y, p2.y) + 1e-9
+  end
+
+  local function isReflex(i)
+    local cross = sign(points[prev[i]], points[i], points[next[i]])
+    return (counterClockwise and cross < 0) or (not counterClockwise and cross > 0)
+  end
+
   local function isEar(i)
     local a = points[prev[i]]
     local b = points[i]
@@ -761,10 +774,18 @@ function utils.triangulate(vertices)
     if counterClockwise and cross <= 0 then return false end
     if not counterClockwise and cross >= 0 then return false end
 
-    -- Check if any other vertex is inside this triangle
+    -- Check if any other vertex is inside this triangle. A reflex vertex
+    -- lying exactly on an ear edge also invalidates the ear: clipping it away
+    -- would create an edge through the polygon's interior.
     local k = next[next[i]]
     while k ~= prev[i] do
-      if pointInTriangle(points[k], a, b, c) then
+      local pt = points[k]
+      if pointInTriangle(pt, a, b, c) then
+        return false
+      end
+      if isReflex(k) and (pointOnSegment(pt, a, b)
+        or pointOnSegment(pt, b, c)
+        or pointOnSegment(pt, c, a)) then
         return false
       end
       k = next[k]

@@ -9,6 +9,7 @@ function Bone.new(boneData, parent, skeleton)
     self.skeleton = skeleton
     self.parent = parent
     self.children = {}
+    self.active = not boneData.skinRequired
     
     self.x = boneData.x
     self.y = boneData.y
@@ -328,6 +329,58 @@ function Skeleton.new(skeletonData)
 end
 
 function Skeleton:updateCache()
+    local skin = self.skin
+
+    -- Bones marked skin-required are inactive until the active skin lists
+    -- them (or a descendant), matching the Spine 4.2 runtime behavior.
+    for _, bone in ipairs(self.bones) do
+        bone.active = not bone.data.skinRequired
+    end
+
+    if skin then
+        for _, boneData in ipairs(skin.bones) do
+            local bone = self:findBone(boneData.name)
+            while bone do
+                bone.active = true
+                bone = bone.parent
+            end
+        end
+    end
+
+    local function skinHasConstraint(data)
+        if not skin then return false end
+        for _, constraintData in ipairs(skin.constraints) do
+            if constraintData == data then return true end
+        end
+        return false
+    end
+
+    for _, constraint in ipairs(self.constraints) do
+        local active = not constraint.data.skinRequired
+            or skinHasConstraint(constraint.data)
+
+        if active then
+            -- A constraint is only active when its target (or its own bone
+            -- for physics) is active.
+            local target = constraint.target
+            local targetBone
+            if target then
+                if target.bone then
+                    targetBone = target.bone
+                elseif target.data then
+                    targetBone = target
+                end
+            elseif constraint.bone then
+                targetBone = constraint.bone
+            end
+            if targetBone and targetBone.active == false then
+                active = false
+            end
+        end
+
+        constraint.active = active
+    end
+
     for _, bone in ipairs(self.bones) do
         if not bone.parent then
             bone:updateWorldTransform()
@@ -343,27 +396,29 @@ function Skeleton:updateWorldTransform()
         end
     end
     
-    -- 2. Apply Constraints (IK, Transform, Path) in order
+    -- 2. Apply active Constraints (IK, Transform, Path, Physics) in order
     for _, constraint in ipairs(self.constraints) do
-        constraint:apply()
-        
-        -- Update children of constrained bones
-        -- This ensures that bones not affected by the constraint but attached to constrained bones
-        -- follow their parents correctly.
-        if constraint.bones then
-            for _, bone in ipairs(constraint.bones) do
-                for _, child in ipairs(bone.children) do
-                    -- Check if child is also constrained by THIS constraint
-                    local isChildConstrained = false
-                    for _, cb in ipairs(constraint.bones) do
-                        if cb == child then
-                            isChildConstrained = true
-                            break
+        if constraint.active ~= false then
+            constraint:apply()
+
+            -- Update children of constrained bones
+            -- This ensures that bones not affected by the constraint but attached to constrained bones
+            -- follow their parents correctly.
+            if constraint.bones then
+                for _, bone in ipairs(constraint.bones) do
+                    for _, child in ipairs(bone.children) do
+                        -- Check if child is also constrained by THIS constraint
+                        local isChildConstrained = false
+                        for _, cb in ipairs(constraint.bones) do
+                            if cb == child then
+                                isChildConstrained = true
+                                break
+                            end
                         end
-                    end
-                    
-                    if not isChildConstrained then
-                        child:updateWorldTransform()
+
+                        if not isChildConstrained then
+                            child:updateWorldTransform()
+                        end
                     end
                 end
             end
@@ -466,7 +521,7 @@ function Skeleton:setSkin(skin)
     end
 
     self.skin = newSkin
-    
+
     -- Apply the new skin to the skeleton slots
     -- This ensures that any currently active attachments are updated to the new skin
     for i, slot in ipairs(self.slots) do
@@ -478,6 +533,8 @@ function Skeleton:setSkin(skin)
             end
         end
     end
+
+    self:updateCache()
 end
 
 function Skeleton:getAttachment(slotName, attachmentName)

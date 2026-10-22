@@ -809,6 +809,152 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("physics: global timelines honor per-constraint Global flags")
+
+do
+  local data = {
+    skeleton = { spine = "4.2.00", width = 100, height = 100 },
+    bones = {
+      { name = "root" },
+      { name = "bob", parent = "root", length = 10 },
+      { name = "tail", parent = "root", length = 10 },
+    },
+    slots = {},
+    skins = { default = {} },
+    physics = {
+      { name = "p", bone = "bob", x = 1, y = 1, inertia = 1, strength = 100,
+        damping = 1, mass = 1, wind = 0, gravity = 0, mix = 1, inertiaGlobal = true },
+      { name = "q", bone = "tail", x = 1, y = 1, inertia = 1, strength = 100,
+        damping = 1, mass = 1, wind = 0, gravity = 0, mix = 1, inertiaGlobal = false },
+    },
+    animations = {
+      a = {
+        physics = {
+          [""] = { inertia = {
+            { time = 0, value = 0.2 },
+            { time = 1, value = 0.8 },
+          } },
+          p = { strength = {
+            { time = 0, value = 33 },
+            { time = 1, value = 44 },
+          } },
+        },
+      },
+    },
+  }
+
+  local inst = spine.loadSkeleton(data)
+  check(#inst.skeletonData.physicsConstraints == 2, "loaded two physics constraints")
+  check(inst.skeletonData.physicsConstraints[1].inertiaGlobal == true,
+    "inertiaGlobal flag parsed")
+
+  inst.animationState:setAnimation(0, "a", false)
+  inst.animationState:update(0)
+  inst.animationState:apply(inst.skeleton)
+
+  check(approx(inst.skeleton.physicsConstraints[1].inertia, 0.2),
+    "global timeline applies to opted-in constraint")
+  check(approx(inst.skeleton.physicsConstraints[2].inertia, 1),
+    "global timeline ignores non-global constraint")
+  check(approx(inst.skeleton.physicsConstraints[1].strength, 33),
+    "specific physics timeline still applies")
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
+section("mesh UVs account for trimmed and rotated atlas regions")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/mix-and-match/mix-and-match-pro.json",
+    "spine_playground/assets/mix-and-match/mix-and-match-pro.atlas", 0.004)
+  local target
+
+  for _, skin in pairs(inst.skeletonData.skins) do
+    for _, attachments in pairs(skin.attachments) do
+      for _, attachment in pairs(attachments) do
+        if not target and attachment.type == "mesh" and attachment.name == "bag-strap-back" then
+          target = attachment
+        end
+      end
+    end
+  end
+
+  check(target ~= nil and target.region ~= nil, "found trimmed rotated mesh")
+  if target then
+    local region = target.region
+    check(region.rotate == true, "bag-strap-back uses a rotated region")
+    check((region.offsetX or 0) ~= 0 or (region.offsetY or 0) ~= 0,
+      "bag-strap-back region is trimmed")
+
+    local minU, maxU, minV, maxV = math.huge, -math.huge, math.huge, -math.huge
+    for i = 1, #target.uvs, 2 do
+      local u, v = target.uvs[i], target.uvs[i + 1]
+      minU, maxU = math.min(minU, u), math.max(maxU, u)
+      minV, maxV = math.min(minV, v), math.max(maxV, v)
+    end
+
+    local expectedUSpan = region.originalHeight / region.textureWidth
+    local expectedVSpan = region.originalWidth / region.textureHeight
+    check(maxU - minU > expectedUSpan * 0.9 and maxU - minU <= expectedUSpan * 1.01,
+      string.format("rotated U span uses original height (%.5f vs %.5f)",
+        maxU - minU, expectedUSpan))
+    check(maxV - minV > expectedVSpan * 0.9 and maxV - minV <= expectedVSpan * 1.01,
+      string.format("rotated V span uses original width (%.5f vs %.5f)",
+        maxV - minV, expectedVSpan))
+  end
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
+section("triangulation handles reflex vertices on ear edges")
+
+do
+  local points = { 0, 0, 100, 0, 100, 50, 50, 50, 50, 100, 0, 100 }
+  local indices = spine.utils.triangulate(points)
+  check(#indices == 12, "L-shaped polygon triangulates into 4 triangles")
+
+  local area = 0
+  for i = 1, #indices, 3 do
+    local a, b, c = indices[i] * 2 + 1, indices[i + 1] * 2 + 1, indices[i + 2] * 2 + 1
+    local x1, y1 = points[a], points[a + 1]
+    local x2, y2 = points[b], points[b + 1]
+    local x3, y3 = points[c], points[c + 1]
+    area = area + math.abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1)) / 2
+  end
+  check(approx(area, 7500, 1e-6), "triangulated area matches the L-shaped polygon")
+end
+
+---------------------------------------------------------------------------
+section("skins: activate skin bones and constraints")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/mix-and-match/mix-and-match-pro.json",
+    "spine_playground/assets/mix-and-match/mix-and-match-pro.atlas", 0.004)
+
+  local bone = inst.skeleton:findBone("hat-base")
+  local hatConstraint, skirtConstraint
+  for _, constraint in ipairs(inst.skeleton.transformConstraints) do
+    if constraint.data.name == "hat-control" then hatConstraint = constraint end
+    if constraint.data.name == "skirt-rotation-front" then skirtConstraint = constraint end
+  end
+
+  check(bone ~= nil and bone.active == false,
+    "skin-required bone starts inactive without a skin")
+  check(hatConstraint ~= nil and hatConstraint.active == false,
+    "skin-required constraint starts inactive without a skin")
+
+  inst.skeleton:setSkin("full-skins/girl")
+  check(bone.active == true, "skin activates its listed bones")
+  check(hatConstraint.active == true, "skin activates its listed constraints")
+  check(skirtConstraint ~= nil and skirtConstraint.active == false,
+    "constraints from other skins stay inactive")
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
 section("asset cache: hits skip JSON parsing; table inputs are not address-keyed")
 
 do

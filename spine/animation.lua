@@ -1337,7 +1337,7 @@ end
 
 function IkConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local constraint = skeleton.ikConstraints[self.ikConstraintIndex]
-    if not constraint then return end
+    if not constraint or constraint.active == false then return end
     
     local frames = self.frames
 
@@ -1416,7 +1416,7 @@ end
 function TransformConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local frames = self.frames
     local constraint = skeleton.transformConstraints[self.transformConstraintIndex]
-    if not constraint then return end
+    if not constraint or constraint.active == false then return end
 
     if time < frames[1] then
         if blend == "setup" then
@@ -1506,26 +1506,26 @@ function PathConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, b
     local frames = self.frames
     if not frames or not frames[1] then
         local constraint = skeleton.pathConstraints[self.pathConstraintIndex]
-        if not constraint then return end
+        if not constraint or constraint.active == false then return end
         if blend == "setup" then
             constraint.position = constraint.data.position
             constraint.spacing = constraint.data.spacing
-            constraint.mixRotate = constraint.data.rotateMix
-            constraint.mixX = constraint.data.translateMix
-            constraint.mixY = constraint.data.translateMix
+            constraint.mixRotate = constraint.data.mixRotate
+            constraint.mixX = constraint.data.mixX
+            constraint.mixY = constraint.data.mixY
         end
         return
     end
     local constraint = skeleton.pathConstraints[self.pathConstraintIndex]
-    if not constraint then return end
+    if not constraint or constraint.active == false then return end
 
     if time < frames[1] then
         if blend == "setup" then
             constraint.position = constraint.data.position
             constraint.spacing = constraint.data.spacing
-            constraint.mixRotate = constraint.data.rotateMix
-            constraint.mixX = constraint.data.translateMix
-            constraint.mixY = constraint.data.translateMix
+            constraint.mixRotate = constraint.data.mixRotate
+            constraint.mixX = constraint.data.mixX
+            constraint.mixY = constraint.data.mixY
         end
         return
     end
@@ -1563,9 +1563,9 @@ function PathConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, b
     if blend == "setup" then
         constraint.position = constraint.data.position + (position - constraint.data.position) * alpha
         constraint.spacing = constraint.data.spacing + (spacing - constraint.data.spacing) * alpha
-        constraint.mixRotate = constraint.data.rotateMix + (rotateMix - constraint.data.rotateMix) * alpha
-        constraint.mixX = constraint.data.translateMix + (translateMix - constraint.data.translateMix) * alpha
-        constraint.mixY = constraint.data.translateMix + (translateMix - constraint.data.translateMix) * alpha
+        constraint.mixRotate = constraint.data.mixRotate + (rotateMix - constraint.data.mixRotate) * alpha
+        constraint.mixX = constraint.data.mixX + (translateMix - constraint.data.mixX) * alpha
+        constraint.mixY = constraint.data.mixY + (translateMix - constraint.data.mixY) * alpha
     else
         constraint.position = constraint.position + (position - constraint.position) * alpha
         constraint.spacing = constraint.spacing + (spacing - constraint.spacing) * alpha
@@ -1604,22 +1604,59 @@ function PhysicsConstraintTimeline:setFrame(frameIndex, time, value)
     self.frames[frameIndex + 2] = value
 end
 
+local PHYSICS_FIELDS = {
+    [0] = { "inertia", "inertiaGlobal" },       -- INERTIA
+    [1] = { "strength", "strengthGlobal" },     -- STRENGTH
+    [2] = { "damping", "dampingGlobal" },       -- DAMPING
+    [3] = { "massInverse", "massGlobal" },      -- MASS_INVERSE
+    [4] = { "wind", "windGlobal" },             -- WIND
+    [5] = { "gravity", "gravityGlobal" },       -- GRAVITY
+    [6] = { "mix", "mixGlobal" },               -- MIX
+}
+
+local function resetPhysicsValue(constraint, timelineType)
+    local info = PHYSICS_FIELDS[timelineType]
+    if info then constraint[info[1]] = constraint.data[info[1]] end
+end
+
+local function applyPhysicsValue(constraint, timelineType, value, alpha, blend)
+    local info = PHYSICS_FIELDS[timelineType]
+    if not info then return end
+    local field = info[1]
+    if blend == "setup" then
+        local setup = constraint.data[field]
+        constraint[field] = setup + (value - setup) * alpha
+    else
+        constraint[field] = constraint[field] + (value - constraint[field]) * alpha
+    end
+end
+
+local function isPhysicsGlobal(constraint, timelineType)
+    local info = PHYSICS_FIELDS[timelineType]
+    return info ~= nil and constraint.data[info[2]] == true
+end
+
 function PhysicsConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local frames = self.frames
-    local constraint = skeleton.physicsConstraints[self.physicsConstraintIndex]
-    if not constraint then return end
+    local constraints = skeleton.physicsConstraints
+    local index = self.physicsConstraintIndex
+    local timelineType = self.type
+
+    local target = index ~= -1 and constraints[index] or nil
+    if index ~= -1 and not target then return end
+    if target and target.active == false then return end
 
     if time < frames[1] then
         if blend == "setup" then
-             local t = self.type
-             if t == PhysicsConstraintTimeline.INERTIA then constraint.inertia = constraint.data.inertia
-             elseif t == PhysicsConstraintTimeline.STRENGTH then constraint.strength = constraint.data.strength
-             elseif t == PhysicsConstraintTimeline.DAMPING then constraint.damping = constraint.data.damping
-             elseif t == PhysicsConstraintTimeline.MASS_INVERSE then constraint.massInverse = constraint.data.massInverse
-             elseif t == PhysicsConstraintTimeline.WIND then constraint.wind = constraint.data.wind
-             elseif t == PhysicsConstraintTimeline.GRAVITY then constraint.gravity = constraint.data.gravity
-             elseif t == PhysicsConstraintTimeline.MIX then constraint.mix = constraint.data.mix
-             end
+            if target then
+                resetPhysicsValue(target, timelineType)
+            else
+                for _, constraint in ipairs(constraints) do
+                    if constraint.active ~= false and isPhysicsGlobal(constraint, timelineType) then
+                        resetPhysicsValue(constraint, timelineType)
+                    end
+                end
+            end
         end
         return
     end
@@ -1634,28 +1671,19 @@ function PhysicsConstraintTimeline:apply(skeleton, lastTime, time, events, alpha
         local time2 = frames[frameIndex + 2]
         local value2 = frames[frameIndex + 3]
         local percent = self:getCurvePercent((frameIndex - 1) / 2, 1 - (time - time2) / (time1 - time2))
-        
+
         val = value1 + (value2 - value1) * percent
     end
 
-    local t = self.type
-    if blend == "setup" then
-        if t == PhysicsConstraintTimeline.INERTIA then constraint.inertia = constraint.data.inertia + (val - constraint.data.inertia) * alpha
-        elseif t == PhysicsConstraintTimeline.STRENGTH then constraint.strength = constraint.data.strength + (val - constraint.data.strength) * alpha
-        elseif t == PhysicsConstraintTimeline.DAMPING then constraint.damping = constraint.data.damping + (val - constraint.data.damping) * alpha
-        elseif t == PhysicsConstraintTimeline.MASS_INVERSE then constraint.massInverse = constraint.data.massInverse + (val - constraint.data.massInverse) * alpha
-        elseif t == PhysicsConstraintTimeline.WIND then constraint.wind = constraint.data.wind + (val - constraint.data.wind) * alpha
-        elseif t == PhysicsConstraintTimeline.GRAVITY then constraint.gravity = constraint.data.gravity + (val - constraint.data.gravity) * alpha
-        elseif t == PhysicsConstraintTimeline.MIX then constraint.mix = constraint.data.mix + (val - constraint.data.mix) * alpha
-        end
+    if target then
+        applyPhysicsValue(target, timelineType, val, alpha, blend)
     else
-        if t == PhysicsConstraintTimeline.INERTIA then constraint.inertia = constraint.inertia + (val - constraint.inertia) * alpha
-        elseif t == PhysicsConstraintTimeline.STRENGTH then constraint.strength = constraint.strength + (val - constraint.strength) * alpha
-        elseif t == PhysicsConstraintTimeline.DAMPING then constraint.damping = constraint.damping + (val - constraint.damping) * alpha
-        elseif t == PhysicsConstraintTimeline.MASS_INVERSE then constraint.massInverse = constraint.massInverse + (val - constraint.massInverse) * alpha
-        elseif t == PhysicsConstraintTimeline.WIND then constraint.wind = constraint.wind + (val - constraint.wind) * alpha
-        elseif t == PhysicsConstraintTimeline.GRAVITY then constraint.gravity = constraint.gravity + (val - constraint.gravity) * alpha
-        elseif t == PhysicsConstraintTimeline.MIX then constraint.mix = constraint.mix + (val - constraint.mix) * alpha
+        -- An empty constraint key is a global timeline; it only affects
+        -- constraints whose matching *Global flag was exported.
+        for _, constraint in ipairs(constraints) do
+            if constraint.active ~= false and isPhysicsGlobal(constraint, timelineType) then
+                applyPhysicsValue(constraint, timelineType, val, alpha, blend)
+            end
         end
     end
 end
@@ -1680,8 +1708,24 @@ end
 
 function PhysicsConstraintResetTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local frames = self.frames
-    local constraint = skeleton.physicsConstraints[self.physicsConstraintIndex]
-    if not constraint then return end
+    local constraints = skeleton.physicsConstraints
+    local index = self.physicsConstraintIndex
+    local target = index ~= -1 and constraints[index] or nil
+    if index ~= -1 and not target then return end
+    if target and target.active == false then return end
+
+    local function resetTargets()
+        if target then
+            target:update("reset")
+        else
+            -- Empty constraint key: reset every active physics constraint.
+            for _, constraint in ipairs(constraints) do
+                if constraint.active ~= false then
+                    constraint:update("reset")
+                end
+            end
+        end
+    end
 
     if lastTime > time then -- Fire events after jump
         -- When looping, we wrap around.
@@ -1706,7 +1750,7 @@ function PhysicsConstraintResetTimeline:apply(skeleton, lastTime, time, events, 
 
     while i <= #frames and time >= frames[i] do
         if lastTime < frames[i] then
-            constraint:update("reset")
+            resetTargets()
         end
         i = i + 1
     end
