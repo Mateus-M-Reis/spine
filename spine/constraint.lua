@@ -851,6 +851,11 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
     local position = self.position
     local spaces = self.spaces
     local out = self.positions
+    -- The first bone reads positions[4]/[5] in tangent mode. The reference
+    -- allocates two extra slots for a single-bone tangent constraint.
+    for i = #out + 1, spacesCount * 3 + 2 do
+        out[i] = 0
+    end
     local world = self.world
     local closed = path.closed
     local verticesLength = path.worldVerticesLength
@@ -1229,8 +1234,9 @@ function PhysicsConstraint:update(physics)
             local sx = math.abs(self.skeleton.scaleX or 1)
             local sy = math.abs(self.skeleton.scaleY or 1)
             
-            local qx = data._limit * delta * sx
-            local qy = qx * sy
+            local limitDelta = data._limit * delta
+            local qx = limitDelta * sx
+            local qy = limitDelta * sy
 
             -- Gravity is scaled by the skeleton's Y scale; wind by X.
             local gApplied = -self.gravity * f * sy
