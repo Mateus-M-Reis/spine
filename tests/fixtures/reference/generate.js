@@ -153,48 +153,56 @@ function generateConstraintTimeline() {
 }
 
 function generatePath() {
-  const input = readInput("path_input.json");
-  const skeletonData = new spine.SkeletonJson(pathLoader).readSkeletonData(input);
-  const skeleton = new spine.Skeleton(skeletonData);
-  skeleton.setToSetupPose();
-  skeleton.updateWorldTransform(spine.Physics.update);
+  const variants = [
+    "path", "path_multi", "path_closed", "path_chain", "path_chain_scale",
+    "path_spacing_percent", "path_spacing_proportional",
+  ];
+  for (const name of variants) {
+    const input = readInput(name + "_input.json");
+    const skeletonData = new spine.SkeletonJson(pathLoader).readSkeletonData(input);
+    const skeleton = new spine.Skeleton(skeletonData);
+    skeleton.setToSetupPose();
+    skeleton.updateWorldTransform(spine.Physics.update);
 
-  const output = {};
-  for (const bone of skeleton.bones) {
-    output[bone.data.name] = [
-      bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
-    ];
+    const output = {};
+    for (const bone of skeleton.bones) {
+      output[bone.data.name] = [
+        bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
+      ];
+    }
+    writeOutput(name + "_expected.json", output);
   }
-  writeOutput("path_expected.json", output);
 }
 
 function generatePhysics() {
-  const input = readInput("physics_input.json");
-  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
-  const skeleton = new spine.Skeleton(skeletonData);
-  skeleton.setToSetupPose();
-  // Match the runtime's initialization pass before the first animation frame.
-  skeleton.updateWorldTransform(spine.Physics.update);
-
-  const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
-  state.setAnimation(0, "move", true);
-  const dt = 1 / 30;
-  for (let i = 0; i < 30; i++) {
-    state.update(dt);
-    state.apply(skeleton);
-    skeleton.update(dt);
+  const variants = ["physics", "physics_rotate", "physics_scale", "physics_shear"];
+  for (const name of variants) {
+    const input = readInput(name + "_input.json");
+    const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+    const skeleton = new spine.Skeleton(skeletonData);
+    skeleton.setToSetupPose();
+    // Match the runtime's initialization pass before the first animation frame.
     skeleton.updateWorldTransform(spine.Physics.update);
-  }
 
-  const output = {};
-  for (const bone of skeleton.bones) {
-    output[bone.data.name] = [
-      bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
-    ];
+    const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+    state.setAnimation(0, "move", true);
+    const dt = 1 / 30;
+    for (let i = 0; i < 30; i++) {
+      state.update(dt);
+      state.apply(skeleton);
+      skeleton.update(dt);
+      skeleton.updateWorldTransform(spine.Physics.update);
+    }
+
+    const output = {};
+    for (const bone of skeleton.bones) {
+      output[bone.data.name] = [
+        bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
+      ];
+    }
+    writeOutput(name + "_expected.json", output);
   }
-  writeOutput("physics_expected.json", output);
 }
-
 generatePose();
 generateTimelines();
 generateIK();

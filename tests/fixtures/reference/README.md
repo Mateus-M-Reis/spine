@@ -9,9 +9,12 @@ project:
   two-track blending at several times.
 - `ik_input.json` / `ik_expected.json`: a two-bone IK chain targeting a setup
   pose bone.
-- `path_input.json` / `path_expected.json`: a one-bone tangent path constraint.
-- `physics_input.json` / `physics_expected.json`: a translating physics
-  constraint sampled after 30 fixed steps.
+- `path_input.json` / `path_expected.json` and the `path_*` variants:
+  one-bone tangent, multi-bone, closed, chain, chain-scale, and percent/
+  proportional spacing path constraints.
+- `physics_input.json` / `physics_expected.json` and the `physics_*`
+  variants: translate, rotate, scale, and shear physics channels sampled after
+  30 fixed steps.
 - `constraint_input.json` / `constraint_expected.json`: a transform constraint
   whose mix values animate from 0 to 1.
 
