@@ -202,9 +202,10 @@ scaling, bounding-box parsing, skeleton scale, physics reference units and
 global physics timelines, trimmed/rotated mesh UVs, stencil clipping (including
 concave-polygon triangulation and the no-stencil fallback), draw-order
 timelines, skin-required bones/constraints, transform-constraint world/local
-modes and shear, reference bone-matrix poses generated with Spine 4.2, animation
-crossfades, track layering, event dispatch (including time-zero events), Spine
-4.2 sequences, and queued animations.
+modes and shear, reference bone-matrix poses generated with Spine 4.2
+(including Bezier and stepped curves, looping playback, multi-track blending,
+and IK), animation crossfades, track layering, event dispatch (including
+time-zero events), Spine 4.2 sequences, and queued animations.
 
 ## Requirements
 

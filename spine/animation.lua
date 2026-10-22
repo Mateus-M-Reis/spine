@@ -16,7 +16,35 @@ function Animation.new(name, timelines, duration)
     return self
 end
 
-function Animation:apply(skeleton, lastTime, time, loop, events, alpha, blend, direction)
+local function timelinePropertyKeys(timeline)
+    local kind, index = timeline.kind, timeline.boneIndex
+    if not kind or not index then return nil end
+    if kind == "rotate" then return { "rotate|" .. index } end
+    if kind == "translate" then return { "x|" .. index, "y|" .. index } end
+    if kind == "translateX" then return { "x|" .. index } end
+    if kind == "translateY" then return { "y|" .. index } end
+    if kind == "scale" then return { "scaleX|" .. index, "scaleY|" .. index } end
+    if kind == "scaleX" then return { "scaleX|" .. index } end
+    if kind == "scaleY" then return { "scaleY|" .. index } end
+    if kind == "shear" then return { "shearX|" .. index, "shearY|" .. index } end
+    if kind == "shearX" then return { "shearX|" .. index } end
+    if kind == "shearY" then return { "shearY|" .. index } end
+    return nil
+end
+
+local function addAnimationPropertyKeys(target, animation)
+    if not animation or not animation.timelines then return end
+    for _, timeline in ipairs(animation.timelines) do
+        local keys = timelinePropertyKeys(timeline)
+        if keys then
+            for _, key in ipairs(keys) do
+                target[key] = true
+            end
+        end
+    end
+end
+
+function Animation:apply(skeleton, lastTime, time, loop, events, alpha, blend, direction, lowerProperties)
     if not self.timelines then return end
 
     if loop and self.duration > 0 then
@@ -29,7 +57,25 @@ function Animation:apply(skeleton, lastTime, time, loop, events, alpha, blend, d
     end
 
     for _, timeline in ipairs(self.timelines) do
-        timeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
+        -- A timeline whose properties are not keyed by a lower track is
+        -- applied with the setup blend in Spine 4.2 (timelineMode FIRST).
+        local timelineBlend = blend
+        if lowerProperties and blend ~= "add" then
+            local keys = timelinePropertyKeys(timeline)
+            if keys then
+                local covered = true
+                for _, key in ipairs(keys) do
+                    if not lowerProperties[key] then
+                        covered = false
+                        break
+                    end
+                end
+                if not covered then
+                    timelineBlend = "setup"
+                end
+            end
+        end
+        timeline:apply(skeleton, lastTime, time, events, alpha, timelineBlend, direction)
     end
 end
 
@@ -81,19 +127,36 @@ function CurveTimeline:setStepped(frameIndex)
     self.curves[frameIndex] = "stepped"
 end
 
+local function sampleCurve(cx1, cy1, cx2, cy2)
+    local xs, ys = {}, {}
+    -- The Spine 4.2 runtime approximates curves with ten linear segments.
+    for step = 0, 10 do
+        local t = step / 10
+        local u = 1 - t
+        local tt = t * t
+        local uu = u * u
+        local ttt = tt * t
+        xs[step + 1] = 3 * uu * t * cx1 + 3 * u * tt * cx2 + ttt
+        ys[step + 1] = 3 * uu * t * cy1 + 3 * u * tt * cy2 + ttt
+    end
+    return { xs = xs, ys = ys }
+end
+
 function CurveTimeline:setCurve(frameIndex, cx1, cy1, cx2, cy2, cx3, cy3, cx4, cy4)
     if not self.curves then
         self.curves = {}
     end
 
-    -- If 8 arguments are provided, it's a 2D curve (separate X and Y)
+    -- If 8 arguments are provided, it's a 2D curve (separate X and Y).
     if cx3 then
         self.curves[frameIndex] = {
-            x = {cx1, cy1, cx2, cy2},
-            y = {cx3, cy3, cx4, cy4}
+            x = sampleCurve(cx1, cy1, cx2, cy2),
+            y = sampleCurve(cx3, cy3, cx4, cy4),
         }
     else
-        self.curves[frameIndex] = {cx1, cy1, cx2, cy2}
+        self.curves[frameIndex] = {
+            x = sampleCurve(cx1, cy1, cx2, cy2),
+        }
     end
 end
 
@@ -109,54 +172,31 @@ function CurveTimeline:getCurvePercent(frameIndex, percent, dimension)
         return 0
     end
 
-    local c = curve
-    if type(curve.x) == "table" then
-        if dimension == 1 then -- Y dimension
-            c = curve.y
-        else -- X dimension
-            c = curve.x
+    local sampler = curve.x
+    if dimension == 1 and curve.y then
+        sampler = curve.y
+    end
+    if not sampler then
+        return percent
+    end
+
+    local xs, ys = sampler.xs, sampler.ys
+    if percent <= xs[1] then
+        return ys[1]
+    elseif percent >= xs[#xs] then
+        return ys[#ys]
+    end
+
+    for i = 2, #xs do
+        if xs[i] >= percent then
+            local x0, y0, x1, y1 = xs[i - 1], ys[i - 1], xs[i], ys[i]
+            if x1 == x0 then return y1 end
+            local t = (percent - x0) / (x1 - x0)
+            return y0 + (y1 - y0) * t
         end
     end
 
-    local cx1, cy1, cx2, cy2 = c[1], c[2], c[3], c[4]
-
-    -- Solve for t given x (percent)
-    -- Bezier curve for X axis: 0, cx1, cx2, 1
-    -- We want to find t such that Bx(t) = percent
-
-    local t = percent
-    -- Iterate to find t
-    for _ = 1, 5 do
-        local u = 1 - t
-        local tt = t * t
-        local uu = u * u
-        local ttt = tt * t
-
-        -- x(t) = 3*(1-t)^2*t*cx1 + 3*(1-t)*t^2*cx2 + t^3
-        local x = 3 * uu * t * cx1 + 3 * u * tt * cx2 + ttt
-        
-        local d = x - percent
-        if math.abs(d) < 0.0001 then break end
-
-        -- Derivative
-        -- B'(t) = 3(1-t)^2(P1-P0) + 6(1-t)t(P2-P1) + 3t^2(P3-P2)
-        -- P0=0, P1=cx1, P2=cx2, P3=1
-        local dx = 3 * uu * cx1 + 6 * u * t * (cx2 - cx1) + 3 * tt * (1 - cx2)
-
-        if dx == 0 then break end
-        t = t - d / dx
-    end
-
-    t = math.max(0, math.min(1, t))
-
-    -- Calculate y using t
-    -- By(t) = 3(1-t)^2*t*cy1 + 3(1-t)t^2*cy2 + t^3
-    local u = 1 - t
-    local tt = t * t
-    local uu = u * u
-    local ttt = tt * t
-
-    return 3 * uu * t * cy1 + 3 * u * tt * cy2 + ttt
+    return ys[#ys]
 end
 
 
@@ -166,6 +206,7 @@ setmetatable(RotateTimeline, {__index = CurveTimeline})
 
 function RotateTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), RotateTimeline)
+    self.kind = "rotate"
     return self
 end
 
@@ -235,6 +276,7 @@ setmetatable(TranslateTimeline, {__index = CurveTimeline})
 
 function TranslateTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), TranslateTimeline)
+    self.kind = "translate"
     return self
 end
 
@@ -303,6 +345,7 @@ setmetatable(ScaleTimeline, {__index = TranslateTimeline})
 
 function ScaleTimeline.new(frameCount)
     local self = setmetatable(TranslateTimeline.new(frameCount), ScaleTimeline)
+    self.kind = "scale"
     return self
 end
 
@@ -382,6 +425,7 @@ setmetatable(ShearTimeline, {__index = TranslateTimeline})
 
 function ShearTimeline.new(frameCount)
     local self = setmetatable(TranslateTimeline.new(frameCount), ShearTimeline)
+    self.kind = "shear"
     return self
 end
 
@@ -918,12 +962,19 @@ function AnimationState:apply(skeleton)
     -- Events from this apply call, for polling and listener dispatch.
     self.events = {}
 
+    local lowerProperties = {}
+
     for _, track in ipairs(ordered) do
+        -- Track 0 uses the normal first-pose blend. Any higher track treats
+        -- properties not keyed by lower tracks as FIRST/setup timelines.
+        local effectiveLower = track.trackIndex > 0 and lowerProperties or nil
+
         -- If a crossfade is in progress, first apply the previous animation
         -- at full weight so the current one blends on top of it.
         if track.previous then
             local prev = track.previous
-            prev.animation:apply(skeleton, prev.lastTime, prev.time, prev.loop, nil, prev.alpha or 1, prev.mixBlend or "first", 1)
+            prev.animation:apply(skeleton, prev.lastTime, prev.time, prev.loop, nil,
+                prev.alpha or 1, prev.mixBlend or "first", 1, effectiveLower)
             prev.lastTime = prev.time
         end
 
@@ -936,13 +987,16 @@ function AnimationState:apply(skeleton)
 
         local blend = track.mixBlend or "first"
         local trackEvents = {}
-        track.animation:apply(skeleton, track.lastTime, track.time, track.loop, trackEvents, alpha, blend, 1)
+        track.animation:apply(skeleton, track.lastTime, track.time, track.loop, trackEvents,
+            alpha, blend, 1, effectiveLower)
         track.lastTime = track.time
 
         for _, event in ipairs(trackEvents) do
             event.trackIndex = track.trackIndex
             table.insert(self.events, event)
         end
+
+        addAnimationPropertyKeys(lowerProperties, track.animation)
 
         -- Fire completion events once, after the final frame has been applied.
         if track.isComplete and not track.completeFired then
@@ -1763,6 +1817,7 @@ setmetatable(TranslateXTimeline, {__index = CurveTimeline})
 
 function TranslateXTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), TranslateXTimeline)
+    self.kind = "translateX"
     return self
 end
 
@@ -1816,6 +1871,7 @@ setmetatable(TranslateYTimeline, {__index = CurveTimeline})
 
 function TranslateYTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), TranslateYTimeline)
+    self.kind = "translateY"
     return self
 end
 
@@ -1869,6 +1925,7 @@ setmetatable(ScaleXTimeline, {__index = CurveTimeline})
 
 function ScaleXTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), ScaleXTimeline)
+    self.kind = "scaleX"
     return self
 end
 
@@ -1937,6 +1994,7 @@ setmetatable(ScaleYTimeline, {__index = CurveTimeline})
 
 function ScaleYTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), ScaleYTimeline)
+    self.kind = "scaleY"
     return self
 end
 
@@ -2005,6 +2063,7 @@ setmetatable(ShearXTimeline, {__index = CurveTimeline})
 
 function ShearXTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), ShearXTimeline)
+    self.kind = "shearX"
     return self
 end
 
@@ -2058,6 +2117,7 @@ setmetatable(ShearYTimeline, {__index = CurveTimeline})
 
 function ShearYTimeline.new(frameCount)
     local self = setmetatable(CurveTimeline.new(frameCount), ShearYTimeline)
+    self.kind = "shearY"
     return self
 end
 
