@@ -809,6 +809,158 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("reference poses: bone matrices match Spine 4.2")
+
+do
+  local input = lovr.filesystem.read("tests/fixtures/reference/pose_input.json")
+  local expectedText = lovr.filesystem.read("tests/fixtures/reference/pose_expected.json")
+  check(input ~= nil and expectedText ~= nil, "reference fixtures readable")
+
+  local data = spine.utils.jsonDecode(input)
+  local expected = spine.utils.jsonDecode(expectedText)
+  check(data ~= nil and expected ~= nil, "reference fixtures parse")
+
+  local inst = spine.loadSkeleton(data)
+  local state = inst.animationState
+  state:setAnimation(0, "move", false)
+
+  local previousTime = 0
+  for _, time in ipairs(expected.times) do
+    state:update(time - previousTime)
+    state:apply(inst.skeleton)
+    inst.skeleton:updateWorldTransform()
+    previousTime = time
+
+    local expectedBones = expected.bones[tostring(time)]
+    local mismatch = nil
+    for _, bone in ipairs(inst.skeleton.bones) do
+      local reference = expectedBones and expectedBones[bone.data.name]
+      if not reference then
+        mismatch = "missing reference for " .. bone.data.name
+        break
+      end
+
+      local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+      for i = 1, 6 do
+        if not approx(actual[i], reference[i], 1e-5) then
+          mismatch = string.format("%s[%d] at t=%.3f: %.6f ~= %.6f",
+            bone.data.name, i, time, actual[i], reference[i])
+          break
+        end
+      end
+      if mismatch then break end
+    end
+
+    check(mismatch == nil, mismatch or ("reference pose matches at t=" .. time))
+  end
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
+section("transform constraints: world/local and relative modes")
+
+do
+  local function skeletonWithTransform(transform)
+    return {
+      skeleton = { spine = "4.2.00", width = 100, height = 100 },
+      bones = {
+        { name = "root" },
+        { name = "target", parent = "root", x = 10, y = 20, rotation = 45,
+          scaleX = 2, scaleY = 1.5 },
+        { name = "bone", parent = "root", x = 1, y = 2, rotation = 10,
+          scaleX = 1.5, scaleY = 1.5 },
+      },
+      slots = {},
+      skins = { default = {} },
+      transform = { transform },
+      animations = {},
+    }
+  end
+
+  local absoluteLocal = spine.loadSkeleton(skeletonWithTransform({
+    name = "t", bones = { "bone" }, target = "target",
+    ["local"] = true, x = 3, y = 4, rotation = 5,
+    scaleX = 0.5, scaleY = 0.25,
+    mixRotate = 1, mixX = 1, mixY = 1,
+    mixScaleX = 1, mixScaleY = 1, mixShearY = 0,
+  }))
+  absoluteLocal.skeleton:updateWorldTransform()
+  local bone = absoluteLocal.skeleton:findBone("bone")
+  check(approx(bone.ax, 13) and approx(bone.ay, 24),
+    "absolute local translation follows target + offset")
+  check(approx(bone.arotation, 50), "absolute local rotation follows target + offset")
+  check(approx(bone.ascaleX, 5/3, 1e-5) and approx(bone.ascaleY, 7/6, 1e-5),
+    "absolute local scale follows target + offset")
+  spine.release(absoluteLocal)
+
+  local relativeLocal = spine.loadSkeleton(skeletonWithTransform({
+    name = "t", bones = { "bone" }, target = "target",
+    ["local"] = true, relative = true, x = 3, y = 4, rotation = 5,
+    scaleX = 0.5, scaleY = 0.25,
+    mixRotate = 1, mixX = 1, mixY = 1,
+    mixScaleX = 1, mixScaleY = 1, mixShearY = 0,
+  }))
+  relativeLocal.skeleton:updateWorldTransform()
+  bone = relativeLocal.skeleton:findBone("bone")
+  check(approx(bone.ax, 14) and approx(bone.ay, 26),
+    "relative local translation adds target + offset")
+  check(approx(bone.arotation, 60), "relative local rotation adds target + offset")
+  check(approx(bone.ascaleX, 3.75) and approx(bone.ascaleY, 2.625),
+    "relative local scale multiplies target scale")
+
+  -- Relative local constraints must not accumulate across frames.
+  relativeLocal.skeleton:updateWorldTransform()
+  check(approx(bone.ax, 14) and approx(bone.arotation, 60),
+    "relative local constraint is stable across repeated updates")
+  spine.release(relativeLocal)
+
+  local world = spine.loadSkeleton({
+    skeleton = { spine = "4.2.00", width = 100, height = 100 },
+    bones = {
+      { name = "root" },
+      { name = "target", parent = "root", x = 100, y = 0 },
+      { name = "bone", parent = "root", x = 0, y = 0 },
+    },
+    slots = {},
+    skins = { default = {} },
+    transform = { {
+      name = "t", bones = { "bone" }, target = "target",
+      x = 10,
+      mixRotate = 0, mixX = 1, mixY = 0,
+      mixScaleX = 0, mixScaleY = 0, mixShearY = 0,
+    } },
+    animations = {},
+  })
+  world.skeleton:updateWorldTransform()
+  bone = world.skeleton:findBone("bone")
+  check(approx(bone.worldX, 110) and approx(bone.worldY, 0),
+    "absolute world translation uses target world transform")
+  spine.release(world)
+
+  local shear = spine.loadSkeleton({
+    skeleton = { spine = "4.2.00", width = 100, height = 100 },
+    bones = {
+      { name = "root" },
+      { name = "target", parent = "root", shearY = 30 },
+      { name = "bone", parent = "root" },
+    },
+    slots = {},
+    skins = { default = {} },
+    transform = { {
+      name = "t", bones = { "bone" }, target = "target",
+      mixRotate = 0, mixX = 0, mixY = 0,
+      mixScaleX = 0, mixScaleY = 0, mixShearY = 1,
+    } },
+    animations = {},
+  })
+  shear.skeleton:updateWorldTransform()
+  bone = shear.skeleton:findBone("bone")
+  check(approx(bone.ashearY, 30, 1e-4), "world shear follows target shear")
+  spine.release(shear)
+end
+
+---------------------------------------------------------------------------
 section("physics: global timelines honor per-constraint Global flags")
 
 do

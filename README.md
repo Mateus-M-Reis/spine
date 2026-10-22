@@ -184,7 +184,14 @@ The runtime can be tested without LÖVR using the bundled LÖVR stub:
 ```bash
 luajit tests/run.lua          # runtime test suite
 luajit tests/run_examples.lua # loads/updates/draws both example projects
+luajit tests/benchmark.lua    # allocation/CPU budget guard
+LOVR_BIN=/path/to/lovr tests/run_lovr_smoke.sh # real-LÖVR smoke test
 ```
+
+The CI workflow runs the headless suite on LuaJIT and Lua 5.4, the example
+smoke tests, and the benchmark budget. The real-LÖVR job is opt-in via manual
+`workflow_dispatch` because hosted runners generally lack a DRI3-capable
+Vulkan display; see `tests/lovr_smoke/README.md`.
 
 The suite covers high-level loading (atlas binding, setup pose), asset caching
 (including parse-free cache hits and reference-counted release), multi-page and
@@ -194,9 +201,10 @@ and clipping, skeleton/slot/attachment color multiplication, deform offset
 scaling, bounding-box parsing, skeleton scale, physics reference units and
 global physics timelines, trimmed/rotated mesh UVs, stencil clipping (including
 concave-polygon triangulation and the no-stencil fallback), draw-order
-timelines, skin-required bones/constraints, animation crossfades, track
-layering, event dispatch (including time-zero events), Spine 4.2 sequences, and
-queued animations.
+timelines, skin-required bones/constraints, transform-constraint world/local
+modes and shear, reference bone-matrix poses generated with Spine 4.2, animation
+crossfades, track layering, event dispatch (including time-zero events), Spine
+4.2 sequences, and queued animations.
 
 ## Requirements
 

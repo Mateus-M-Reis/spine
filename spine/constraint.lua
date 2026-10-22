@@ -5,7 +5,8 @@ local mathModule = require("spine.math")
 local utilsModule = require("spine.utils")
 
 local math_abs = math.abs
-local math_atan2 = math.atan2
+local math_atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
+local math_ceil = math.ceil
 local math_cos = math.cos
 local math_sin = math.sin
 local math_sqrt = math.sqrt
@@ -368,125 +369,217 @@ function TransformConstraint:setToSetupPose()
     self.mixShearY = self.data.mixShearY
 end
 
+local function refreshWorldFields(bone)
+    bone.worldRotation = math_deg(math_atan2(bone.c, bone.a))
+    bone.worldScaleX = math_sqrt(bone.a * bone.a + bone.c * bone.c)
+    bone.worldScaleY = math_sqrt(bone.b * bone.b + bone.d * bone.d)
+end
+
+local function finishWorldConstraint(bone)
+    refreshWorldFields(bone)
+    bone:updateAppliedTransform()
+    bone:updateChildrenWorldTransform()
+end
+
+local function normalizeRadians(angle)
+    if angle > math_pi then
+        return angle - math_pi * 2
+    elseif angle < -math_pi then
+        return angle + math_pi * 2
+    end
+    return angle
+end
+
 function TransformConstraint:apply()
-    for _, bone in ipairs(self.bones) do
-        self:update(bone, self.mixRotate, self.mixX, self.mixY, self.mixScaleX, self.mixScaleY, self.mixShearY)
+    local mixRotate = self.mixRotate
+    local mixX = self.mixX
+    local mixY = self.mixY
+    local mixScaleX = self.mixScaleX
+    local mixScaleY = self.mixScaleY
+    local mixShearY = self.mixShearY
+
+    if mixRotate == 0 and mixX == 0 and mixY == 0
+        and mixScaleX == 0 and mixScaleY == 0 and mixShearY == 0 then
+        return
+    end
+
+    if self.local_ then
+        if self.relative then
+            self:applyRelativeLocal()
+        else
+            self:applyAbsoluteLocal()
+        end
+    else
+        if self.relative then
+            self:applyRelativeWorld()
+        else
+            self:applyAbsoluteWorld()
+        end
     end
 end
 
-function TransformConstraint:update(bone, mixRotate, mixX, mixY, mixScaleX, mixScaleY, mixShearY)
+function TransformConstraint:applyAbsoluteWorld()
+    local mixRotate, mixX, mixY = self.mixRotate, self.mixX, self.mixY
+    local mixScaleX, mixScaleY, mixShearY = self.mixScaleX, self.mixScaleY, self.mixShearY
+    local translate = mixX ~= 0 or mixY ~= 0
     local target = self.target
-    
-    -- Helper to compute world rotation from matrix
-    local function getWorldRotationX(b)
-        return math_deg(math_atan2(b.c, b.a))
-    end
-    
-    -- Helper to compute world scale
-    local function getWorldScaleX(b)
-        return math_sqrt(b.a * b.a + b.c * b.c)
-    end
-    
-    local function getWorldScaleY(b)
-        return math_sqrt(b.b * b.b + b.d * b.d)
-    end
-    
-    -- Helper to compute world shear Y
-    local function getWorldShearY(b)
-        -- Shear is harder to extract from matrix
-        -- For now, approximate or skip
-        return 0
-    end
-    
-    	if mixRotate > 0 then
-        local r = 0
-        		if self.local_ then
-			-- Local coordinate space (relative to parent)
-			-- Special case: for head bone targeting aim-constraint-target, SUBTRACT offset
-			local targetRotation = target.rotation + self.data.offsetRotation
-			
-			local rotation = bone.rotation
-			
-			-- Normalize to shortest angle
-			local diff = targetRotation - rotation
-			diff = (diff + 180) % 360 - 180
-			
-			bone.rotation = rotation + diff * self.mixRotate
-			bone.appliedRotation = bone.rotation
-		else
-			-- World coordinate space (standard)
-			-- target:updateWorldTransform() -- REMOVED: Do not reset target if it was modified by previous constraints (like PathConstraint)
-			
-			local targetRotation = getWorldRotationX(target) + self.data.offsetRotation
-            
-			local rotation = getWorldRotationX(bone)
-			
-			-- Normalize to shortest angle
-			local diff = targetRotation - rotation
-			diff = (diff + 180) % 360 - 180
-			
-			bone.rotation = bone.rotation + diff * self.mixRotate
-			bone.appliedRotation = bone.rotation
-		end
-	end
-    
-    if mixX > 0 or mixY > 0 then
-        -- Translate towards target position with rotated offset, converted to local space
-        -- 1) rotate offset by target's world rotation and add to target world position
-        local ox, oy = self.offsetX, self.offsetY
-        local targetX = ox * target.a + oy * target.b + target.worldX
-        local targetY = ox * target.c + oy * target.d + target.worldY
+    local ta, tb, tc, td = target.a, target.b, target.c, target.d
+    local degRadReflect = ta * td - tb * tc > 0 and math_pi / 180 or -math_pi / 180
+    local offsetRotation = (self.data.offsetRotation or 0) * degRadReflect
+    local offsetShearY = (self.data.offsetShearY or 0) * degRadReflect
 
-        -- 2) convert desired world position to bone's local coordinates (relative to parent)
-        local parent = bone.parent
-        if parent then
-            local dx = targetX - parent.worldX
-            local dy = targetY - parent.worldY
-            local det = parent.a * parent.d - parent.b * parent.c
-            if det == 0 then det = 1 end
-            local lx = (dx * parent.d - dy * parent.b) / det
-            local ly = (-dx * parent.c + dy * parent.a) / det
-
-            if mixX > 0 then
-                bone.x = bone.x + (lx - bone.x) * mixX
-            end
-            if mixY > 0 then
-                bone.y = bone.y + (ly - bone.y) * mixY
-            end
-        else
-            -- No parent: local == world
-            if mixX > 0 then
-                bone.x = bone.x + (targetX - bone.x) * mixX
-            end
-            if mixY > 0 then
-                bone.y = bone.y + (targetY - bone.y) * mixY
-            end
+    for _, bone in ipairs(self.bones) do
+        if mixRotate ~= 0 then
+            local a, b, c, d = bone.a, bone.b, bone.c, bone.d
+            local r = normalizeRadians(math_atan2(tc, ta) - math_atan2(c, a) + offsetRotation)
+            r = r * mixRotate
+            local cos, sin = math_cos(r), math_sin(r)
+            bone.a = cos * a - sin * c
+            bone.b = cos * b - sin * d
+            bone.c = sin * a + cos * c
+            bone.d = sin * b + cos * d
         end
+
+        if translate then
+            local tx = ta * self.offsetX + tb * self.offsetY + target.worldX
+            local ty = tc * self.offsetX + td * self.offsetY + target.worldY
+            bone.worldX = bone.worldX + (tx - bone.worldX) * mixX
+            bone.worldY = bone.worldY + (ty - bone.worldY) * mixY
+        end
+
+        if mixScaleX ~= 0 then
+            local scale = math_sqrt(bone.a * bone.a + bone.c * bone.c)
+            if scale ~= 0 then
+                scale = (scale + (math_sqrt(ta * ta + tc * tc) - scale + self.offsetScaleX) * mixScaleX) / scale
+            end
+            bone.a, bone.c = bone.a * scale, bone.c * scale
+        end
+
+        if mixScaleY ~= 0 then
+            local scale = math_sqrt(bone.b * bone.b + bone.d * bone.d)
+            if scale ~= 0 then
+                scale = (scale + (math_sqrt(tb * tb + td * td) - scale + self.offsetScaleY) * mixScaleY) / scale
+            end
+            bone.b, bone.d = bone.b * scale, bone.d * scale
+        end
+
+        if mixShearY > 0 then
+            local b, d = bone.b, bone.d
+            local by = math_atan2(d, b)
+            local r = normalizeRadians(math_atan2(td, tb) - math_atan2(tc, ta) - (by - math_atan2(bone.c, bone.a)))
+            r = by + (r + offsetShearY) * mixShearY
+            local scale = math_sqrt(b * b + d * d)
+            bone.b = math_cos(r) * scale
+            bone.d = math_sin(r) * scale
+        end
+
+        finishWorldConstraint(bone)
     end
-    
-    if mixScaleX > 0 then
-        local targetScale = getWorldScaleX(target)
-        local boneScale = getWorldScaleX(bone)
-        local s = targetScale - boneScale
-        bone.scaleX = bone.scaleX + s * mixScaleX
+end
+
+function TransformConstraint:applyRelativeWorld()
+    local mixRotate, mixX, mixY = self.mixRotate, self.mixX, self.mixY
+    local mixScaleX, mixScaleY, mixShearY = self.mixScaleX, self.mixScaleY, self.mixShearY
+    local translate = mixX ~= 0 or mixY ~= 0
+    local target = self.target
+    local ta, tb, tc, td = target.a, target.b, target.c, target.d
+    local degRadReflect = ta * td - tb * tc > 0 and math_pi / 180 or -math_pi / 180
+    local offsetRotation = (self.data.offsetRotation or 0) * degRadReflect
+    local offsetShearY = (self.data.offsetShearY or 0) * degRadReflect
+
+    for _, bone in ipairs(self.bones) do
+        if mixRotate ~= 0 then
+            local a, b, c, d = bone.a, bone.b, bone.c, bone.d
+            local r = normalizeRadians(math_atan2(tc, ta) + offsetRotation) * mixRotate
+            local cos, sin = math_cos(r), math_sin(r)
+            bone.a = cos * a - sin * c
+            bone.b = cos * b - sin * d
+            bone.c = sin * a + cos * c
+            bone.d = sin * b + cos * d
+        end
+
+        if translate then
+            local tx = ta * self.offsetX + tb * self.offsetY + target.worldX
+            local ty = tc * self.offsetX + td * self.offsetY + target.worldY
+            bone.worldX = bone.worldX + tx * mixX
+            bone.worldY = bone.worldY + ty * mixY
+        end
+
+        if mixScaleX ~= 0 then
+            local scale = (math_sqrt(ta * ta + tc * tc) - 1 + self.offsetScaleX) * mixScaleX + 1
+            bone.a, bone.c = bone.a * scale, bone.c * scale
+        end
+        if mixScaleY ~= 0 then
+            local scale = (math_sqrt(tb * tb + td * td) - 1 + self.offsetScaleY) * mixScaleY + 1
+            bone.b, bone.d = bone.b * scale, bone.d * scale
+        end
+
+        if mixShearY > 0 then
+            local r = normalizeRadians(math_atan2(td, tb) - math_atan2(tc, ta))
+            local b, d = bone.b, bone.d
+            r = math_atan2(d, b) + (r - math_pi / 2 + offsetShearY) * mixShearY
+            local scale = math_sqrt(b * b + d * d)
+            bone.b = math_cos(r) * scale
+            bone.d = math_sin(r) * scale
+        end
+
+        finishWorldConstraint(bone)
     end
-    
-    if mixScaleY > 0 then
-        local targetScale = getWorldScaleY(target)
-        local boneScale = getWorldScaleY(bone)
-        local s = targetScale - boneScale
-        bone.scaleY = bone.scaleY + s * mixScaleY
+end
+
+function TransformConstraint:applyAbsoluteLocal()
+    local mixRotate, mixX, mixY = self.mixRotate, self.mixX, self.mixY
+    local mixScaleX, mixScaleY, mixShearY = self.mixScaleX, self.mixScaleY, self.mixShearY
+    local target = self.target
+
+    for _, bone in ipairs(self.bones) do
+        if mixRotate ~= 0 then
+            local r = target.rotation - bone.rotation + (self.data.offsetRotation or 0)
+            r = r - math_ceil(r / 360 - 0.5) * 360
+            bone.rotation = bone.rotation + r * mixRotate
+        end
+
+        bone.x = bone.x + (target.x - bone.x + self.offsetX) * mixX
+        bone.y = bone.y + (target.y - bone.y + self.offsetY) * mixY
+
+        if mixScaleX ~= 0 and bone.scaleX ~= 0 then
+            -- Reference runtimes normalize the absolute-local scale by the
+            -- bone's current scale before rebuilding the world transform.
+            bone.scaleX = (bone.scaleX
+                + (target.scaleX - bone.scaleX + self.offsetScaleX) * mixScaleX) / bone.scaleX
+        end
+        if mixScaleY ~= 0 and bone.scaleY ~= 0 then
+            bone.scaleY = (bone.scaleY
+                + (target.scaleY - bone.scaleY + self.offsetScaleY) * mixScaleY) / bone.scaleY
+        end
+
+        if mixShearY ~= 0 then
+            local r = target.shearY - bone.shearY + (self.data.offsetShearY or 0)
+            r = r - math_ceil(r / 360 - 0.5) * 360
+            bone.shearY = bone.shearY + r * mixShearY
+        end
+
+        bone:updateWorldTransform()
+        refreshWorldFields(bone)
     end
-    
-    if mixShearY > 0 then
-        local targetShear = getWorldShearY(target)
-        local boneShear = getWorldShearY(bone)
-        local s = targetShear - boneShear
-        bone.shearY = bone.shearY + s * mixShearY
+end
+
+function TransformConstraint:applyRelativeLocal()
+    local mixRotate, mixX, mixY = self.mixRotate, self.mixX, self.mixY
+    local mixScaleX, mixScaleY, mixShearY = self.mixScaleX, self.mixScaleY, self.mixShearY
+    local target = self.target
+
+    for _, bone in ipairs(self.bones) do
+        bone.rotation = bone.rotation + (target.rotation + (self.data.offsetRotation or 0)) * mixRotate
+        bone.x = bone.x + (target.x + self.offsetX) * mixX
+        bone.y = bone.y + (target.y + self.offsetY) * mixY
+        bone.scaleX = bone.scaleX * (((target.scaleX - 1 + self.offsetScaleX) * mixScaleX) + 1)
+        bone.scaleY = bone.scaleY * (((target.scaleY - 1 + self.offsetScaleY) * mixScaleY) + 1)
+        bone.shearY = bone.shearY + (target.shearY + (self.data.offsetShearY or 0)) * mixShearY
+
+        bone:updateWorldTransform()
+        refreshWorldFields(bone)
     end
-    
-    -- Update world transform to apply the changes
-    bone:updateWorldTransform()
 end
 
 
