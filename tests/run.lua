@@ -949,6 +949,49 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("reference constraints: transform timeline")
+
+do
+  local input = lovr.filesystem.read("tests/fixtures/reference/constraint_input.json")
+  local expectedText = lovr.filesystem.read("tests/fixtures/reference/constraint_expected.json")
+  check(input ~= nil and expectedText ~= nil, "constraint timeline fixtures readable")
+
+  local data = spine.utils.jsonDecode(input)
+  local expected = spine.utils.jsonDecode(expectedText)
+  check(data ~= nil and expected ~= nil, "constraint timeline fixtures parse")
+
+  local inst = spine.loadSkeleton(data)
+  local state = inst.animationState
+  state:setAnimation(0, "mix", false)
+
+  local previousTime = 0
+  for _, time in ipairs(expected.times) do
+    state:update(time - previousTime)
+    state:apply(inst.skeleton)
+    inst.skeleton:updateWorldTransform()
+    previousTime = time
+
+    local mismatch = nil
+    local expectedBones = expected.bones[tostring(time)]
+    for _, bone in ipairs(inst.skeleton.bones) do
+      local reference = expectedBones[bone.data.name]
+      local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+      for i = 1, 6 do
+        if not approx(actual[i], reference[i], 1e-4) then
+          mismatch = string.format("transform timeline %s[%d] at t=%.3f: %.6f ~= %.6f",
+            bone.data.name, i, time, actual[i], reference[i])
+          break
+        end
+      end
+      if mismatch then break end
+    end
+    check(mismatch == nil, mismatch or ("transform timeline matches at t=" .. time))
+  end
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
 section("transform constraints: world/local and relative modes")
 
 do

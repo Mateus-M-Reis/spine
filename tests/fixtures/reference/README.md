@@ -9,6 +9,8 @@ project:
   two-track blending at several times.
 - `ik_input.json` / `ik_expected.json`: a two-bone IK chain targeting a setup
   pose bone.
+- `constraint_input.json` / `constraint_expected.json`: a transform constraint
+  whose mix values animate from 0 to 1.
 
 Regenerate all expected files with:
 

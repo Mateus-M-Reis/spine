@@ -1,0 +1,26 @@
+{
+  "skeleton": { "spine": "4.2.00", "width": 200, "height": 200 },
+  "bones": [
+    { "name": "root" },
+    { "name": "target", "parent": "root", "x": 100, "y": 20, "rotation": 30 },
+    { "name": "bone", "parent": "root", "x": 50, "y": 0 }
+  ],
+  "slots": [],
+  "skins": {},
+  "transform": [
+    { "name": "follow", "bones": ["bone"], "target": "target",
+      "x": 10, "y": 5, "rotation": 15,
+      "mixRotate": 1, "mixX": 1, "mixY": 1,
+      "mixScaleX": 1, "mixScaleY": 1, "mixShearY": 1 }
+  ],
+  "animations": {
+    "mix": {
+      "transform": {
+        "follow": [
+          { "time": 0, "mixRotate": 0, "mixX": 0, "mixY": 0, "mixScaleX": 0, "mixScaleY": 0, "mixShearY": 0 },
+          { "time": 1, "mixRotate": 1, "mixX": 1, "mixY": 1, "mixScaleX": 1, "mixScaleY": 1, "mixShearY": 1 }
+        ]
+      }
+    }
+  }
+}
