@@ -600,7 +600,7 @@ function AttachmentTimeline:apply(skeleton, lastTime, time, events, alpha, blend
     local frames = self.frames
     local slot = skeleton.slots[self.slotIndex]
     if not slot then return end
-    
+
     if #frames == 0 or not frames[1] then return end
 
     if time < frames[1] then
@@ -662,7 +662,7 @@ function DeformTimeline:apply(skeleton, lastTime, time, events, alpha, blend, di
     -- The timeline stores 'attachmentName'.
     -- If attachment.name == self.attachmentName -> Match.
     -- If attachment.parentMesh and attachment.inheritDeform -> Check parentMesh.name == self.attachmentName.
-    
+
     local apply = false
     if attachment.name == self.attachmentName then
         apply = true
@@ -671,7 +671,7 @@ function DeformTimeline:apply(skeleton, lastTime, time, events, alpha, blend, di
             apply = true
         end
     end
-    
+
     if not apply then return end
 
     local frames = self.frames
@@ -714,32 +714,32 @@ function DeformTimeline:apply(skeleton, lastTime, time, events, alpha, blend, di
 
         local prevCount = #prevVerts
         local nextCount = #nextVerts
-        
+
         -- Calculate range to iterate (union of both frames)
         -- We only need to update indices that are touched by either frame
         -- But 'out' is already zeroed, so we just need to write non-zero interpolated values?
         -- No, we need to write ALL values that deviate from 0.
         -- If prev has value and next is 0, we interpolate to 0.
         -- If both are 0, result is 0 (already set).
-        
+
         -- Iterate from min start to max end
         local minStart = math.min(prevOffset, nextOffset) + 1
         local maxEnd = math.max(prevOffset + prevCount, nextOffset + nextCount)
-        
+
         for i = minStart, maxEnd do
             local prevVal = 0
             local nextVal = 0
-            
+
             -- Check if i is within prev frame range
             if i > prevOffset and i <= prevOffset + prevCount then
                 prevVal = prevVerts[i - prevOffset]
             end
-            
+
             -- Check if i is within next frame range
             if i > nextOffset and i <= nextOffset + nextCount then
                 nextVal = nextVerts[i - nextOffset]
             end
-            
+
             out[i] = prevVal + (nextVal - prevVal) * percent
         end
     end
@@ -1392,7 +1392,7 @@ end
 function IkConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local constraint = skeleton.ikConstraints[self.ikConstraintIndex]
     if not constraint or constraint.active == false then return end
-    
+
     local frames = self.frames
 
     if time < frames[1] then
@@ -1785,7 +1785,7 @@ function PhysicsConstraintResetTimeline:apply(skeleton, lastTime, time, events, 
         -- When looping, we wrap around.
         -- We must fire any resets that are AFTER lastTime (up to end of duration)
         -- AND any resets that are BEFORE time (from 0).
-        
+
         -- DISABLE FLUSH for Physics: Resetting physics at loop boundary kills momentum.
         -- Only reset if explicitly keyed at the start of the new loop.
         lastTime = -1

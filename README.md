@@ -1,5 +1,7 @@
 # Spine LÖVR Runtime
 
+**Version 1.3.0** · [Changelog](CHANGELOG.md)
+
 A complete Spine skeletal animation runtime for LÖVR, implementing the Spine animation system with efficient 3D rendering.
 
 ## Features
@@ -185,11 +187,12 @@ The runtime can be tested without LÖVR using the bundled LÖVR stub:
 luajit tests/run.lua          # runtime test suite
 luajit tests/run_examples.lua # loads/updates/draws both example projects
 luajit tests/benchmark.lua    # allocation/CPU budget guard
+luacheck init.lua spine tests # static analysis
 LOVR_BIN=/path/to/lovr tests/run_lovr_smoke.sh # real-LÖVR smoke test
 ```
 
-The CI workflow runs the headless suite on LuaJIT and Lua 5.4, the example
-smoke tests, and the benchmark budget. The real-LÖVR job is opt-in via manual
+The CI workflow runs the headless suite on LuaJIT and Lua 5.4, static analysis,
+the example smoke tests, and the benchmark budget. The real-LÖVR job is opt-in via manual
 `workflow_dispatch` because hosted runners generally lack a DRI3-capable
 Vulkan display; see `tests/lovr_smoke/README.md`.
 

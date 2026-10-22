@@ -501,7 +501,7 @@ function PathAttachment:computeWorldVertices(slot, start, count, worldVertices, 
     local v = 1
     local b = 1
     local w = 1
-    
+
     -- Skip to start
     for i = 0, start - 1, 2 do
       local n = bones[b]
@@ -511,15 +511,15 @@ function PathAttachment:computeWorldVertices(slot, start, count, worldVertices, 
     end
 
     local skeletonBones = skeleton.bones
-    
+
     if deform and #deform > 0 then
       for i = 0, count - 1, 2 do
         local wx, wy = 0, 0
         local boneCount = bones[b]
         b = b + 1
-        
+
         if not boneCount then break end
-        
+
         for ii = 1, boneCount do
           local boneIndex = bones[b]
           b = b + 1
@@ -529,11 +529,11 @@ function PathAttachment:computeWorldVertices(slot, start, count, worldVertices, 
           local weight = weights[w]
           v = v + 2
           w = w + 1
-          
+
           wx = wx + (vx * bone.a + vy * bone.b + bone.worldX) * weight
           wy = wy + (vx * bone.c + vy * bone.d + bone.worldY) * weight
         end
-        
+
         local dest = offset + (i / 2) * stride + 1
         worldVertices[dest] = wx
         worldVertices[dest + 1] = wy
@@ -543,9 +543,9 @@ function PathAttachment:computeWorldVertices(slot, start, count, worldVertices, 
         local wx, wy = 0, 0
         local boneCount = bones[b]
         b = b + 1
-        
+
         if not boneCount then break end
-        
+
         for ii = 1, boneCount do
           local boneIndex = bones[b]
           b = b + 1
@@ -555,11 +555,11 @@ function PathAttachment:computeWorldVertices(slot, start, count, worldVertices, 
           local weight = weights[w]
           v = v + 2
           w = w + 1
-          
+
           wx = wx + (vx * bone.a + vy * bone.b + bone.worldX) * weight
           wy = wy + (vx * bone.c + vy * bone.d + bone.worldY) * weight
         end
-        
+
         local dest = offset + (i / 2) * stride + 1
         worldVertices[dest] = wx
         worldVertices[dest + 1] = wy
@@ -754,7 +754,7 @@ function ClippingAttachment:computeWorldVertices(slot, worldVertices)
     for i = 1, vertexCount * 2, 2 do
       local wx = 0
       local wy = 0
-      
+
       local boneCount = bones[b]
       local nn = b + boneCount
       b = b + 1
@@ -1336,7 +1336,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
       physicsData.order = physicsJson.order or 0
       physicsData.skinRequired = physicsJson.skin or false
       physicsData.bone = self:findBone(physicsJson.bone)
-      
+
       -- Channel strengths are multipliers, not lengths; only the limit is
       -- expressed in skeleton units (matching the Spine 4.2 reference).
       physicsData._x = physicsJson.x or 0
@@ -1346,14 +1346,14 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
       physicsData._shearX = physicsJson.shearX or 0
       physicsData._limit = (physicsJson.limit or 5000) * self.scale
       physicsData._step = 1 / (physicsJson.fps or 60)
-      
+
       physicsData.inertia = physicsJson.inertia or 1
       physicsData.strength = physicsJson.strength or 100
       physicsData.damping = physicsJson.damping or 1
-      
+
       local mass = physicsJson.mass or 1
       physicsData.massInverse = 1 / mass
-      
+
       physicsData.wind = physicsJson.wind or 0
       physicsData.gravity = physicsJson.gravity or 0
       physicsData.mix = (physicsJson.mix ~= nil) and physicsJson.mix or 1
@@ -1364,7 +1364,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
       physicsData.windGlobal = physicsJson.windGlobal or false
       physicsData.gravityGlobal = physicsJson.gravityGlobal or false
       physicsData.mixGlobal = physicsJson.mixGlobal or false
-      
+
       table.insert(self.physicsConstraints, physicsData)
     end
   end
@@ -1438,7 +1438,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                         local valChange = (nextFrame.value or 0) - angle
                         while valChange > 180 do valChange = valChange - 360 end
                         while valChange < -180 do valChange = valChange + 360 end
-                        
+
                         local c = frame.curve
                         local cx1 = (c[1] - time) / frameDuration
                         local cy1 = (valChange == 0) and 0 or (c[2] - angle) / valChange
@@ -1479,17 +1479,17 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                             local frameDuration = nextFrame.time - time
                             local xChange = (nextFrame.x or 0) * self.scale - x
                             local yChange = (nextFrame.y or 0) * self.scale - y
-                            
+
                             local cx1 = (c[1] - time) / frameDuration
                             local cy1 = (xChange == 0) and 0 or (c[2] * self.scale - x) / xChange
                             local cx2 = (c[3] - time) / frameDuration
                             local cy2 = (xChange == 0) and 0 or (c[4] * self.scale - x) / xChange
-                            
+
                             local cx3 = (c[5] - time) / frameDuration
                             local cy3 = (yChange == 0) and 0 or (c[6] * self.scale - y) / yChange
                             local cx4 = (c[7] - time) / frameDuration
                             local cy4 = (yChange == 0) and 0 or (c[8] * self.scale - y) / yChange
-                            
+
                             timeline:setCurve(i - 1, cx1, cy1, cx2, cy2, cx3, cy3, cx4, cy4)
                         else
                             timeline:setCurve(i - 1, c[1], c[2], c[3], c[4])
@@ -1525,7 +1525,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) * self.scale - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] * self.scale - val) / valChange
@@ -1561,7 +1561,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) * self.scale - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] * self.scale - val) / valChange
@@ -1601,17 +1601,17 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                             local frameDuration = nextFrame.time - time
                             local xChange = (nextFrame.x or 1) - x
                             local yChange = (nextFrame.y or 1) - y
-                            
+
                             local cx1 = (c[1] - time) / frameDuration
                             local cy1 = (xChange == 0) and 0 or (c[2] - x) / xChange
                             local cx2 = (c[3] - time) / frameDuration
                             local cy2 = (xChange == 0) and 0 or (c[4] - x) / xChange
-                            
+
                             local cx3 = (c[5] - time) / frameDuration
                             local cy3 = (yChange == 0) and 0 or (c[6] - y) / yChange
                             local cx4 = (c[7] - time) / frameDuration
                             local cy4 = (yChange == 0) and 0 or (c[8] - y) / yChange
-                            
+
                             timeline:setCurve(i - 1, cx1, cy1, cx2, cy2, cx3, cy3, cx4, cy4)
                         else
                             timeline:setCurve(i - 1, c[1], c[2], c[3], c[4])
@@ -1647,7 +1647,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] - val) / valChange
@@ -1683,7 +1683,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] - val) / valChange
@@ -1723,17 +1723,17 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                             local frameDuration = nextFrame.time - time
                             local xChange = (nextFrame.x or 0) - x
                             local yChange = (nextFrame.y or 0) - y
-                            
+
                             local cx1 = (c[1] - time) / frameDuration
                             local cy1 = (xChange == 0) and 0 or (c[2] - x) / xChange
                             local cx2 = (c[3] - time) / frameDuration
                             local cy2 = (xChange == 0) and 0 or (c[4] - x) / xChange
-                            
+
                             local cx3 = (c[5] - time) / frameDuration
                             local cy3 = (yChange == 0) and 0 or (c[6] - y) / yChange
                             local cx4 = (c[7] - time) / frameDuration
                             local cy4 = (yChange == 0) and 0 or (c[8] - y) / yChange
-                            
+
                             timeline:setCurve(i - 1, cx1, cy1, cx2, cy2, cx3, cy3, cx4, cy4)
                         else
                             timeline:setCurve(i - 1, c[1], c[2], c[3], c[4])
@@ -1769,7 +1769,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] - val) / valChange
@@ -1805,7 +1805,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       if nextFrame then
                           local frameDuration = nextFrame.time - time
                           local valChange = (nextFrame.value or 0) - val
-                          
+
                           local c = frame.curve
                           local cx1 = (c[1] - time) / frameDuration
                           local cy1 = (valChange == 0) and 0 or (c[2] - val) / valChange
@@ -2021,11 +2021,11 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       local nextFrame = source[i+1]
                       if nextFrame then
                         local frameDuration = nextFrame.time - time
-                        
+
                         -- Calculate value change for normalization
                         local currentVal = 0
                         local nextVal = 0
-                        
+
                         if sourceType == "position" then
                             currentVal = position
                             nextVal = (nextFrame.value or nextFrame.position or 0)
@@ -2045,9 +2045,9 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                             currentVal = translateMix
                             nextVal = (nextFrame.mixY or nextFrame.value or (defaultData.mixY or 1))
                         end
-                        
+
                         local valChange = nextVal - currentVal
-                        
+
                         local c = frame.curve
                         local cx1 = (c[1] - time) / frameDuration
                         local cy1 = (valChange == 0) and 0 or (c[2] - currentVal) / valChange
@@ -2095,12 +2095,12 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                     local frameCount = #timelineData
                     local timeline = animationModule.PhysicsConstraintTimeline.new(frameCount, timelineType)
                     timeline.physicsConstraintIndex = constraintIndex
-                    
+
                     for i, frame in ipairs(timelineData) do
                         local time = frame.time or 0
                         local value = frame.value or 0
                         timeline:setFrame(i - 1, time, value)
-                        
+
                         if frame.curve then
                             if frame.curve == "stepped" then
                                 timeline:setStepped(i - 1)
@@ -2109,18 +2109,18 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                                 if nextFrame then
                                     local frameDuration = nextFrame.time - time
                                     local valChange = (nextFrame.value or 0) - value
-                                    
+
                                     local c = frame.curve
                                     local cx1 = (c[1] - time) / frameDuration
                                     local cy1 = (valChange == 0) and 0 or (c[2] - value) / valChange
                                     local cx2 = (c[3] - time) / frameDuration
                                     local cy2 = (valChange == 0) and 0 or (c[4] - value) / valChange
-                                    
+
                                     timeline:setCurve(i - 1, cx1, cy1, cx2, cy2)
                                 end
                             end
                         end
-                        
+
                         if time > duration then duration = time end
                     end
                     table.insert(timelines, timeline)
@@ -2128,7 +2128,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                      local frameCount = #timelineData
                      local timeline = animationModule.PhysicsConstraintResetTimeline.new(frameCount)
                      timeline.physicsConstraintIndex = constraintIndex
-                     
+
                      for i, frame in ipairs(timelineData) do
                          local time = frame.time or 0
                          timeline:setFrame(i - 1, time)
@@ -2444,21 +2444,21 @@ function SkeletonData:linkMeshes()
     if not skin then
        skin = self:findSkin(linkedMesh.skinName)
     end
-    if not skin then 
+    if not skin then
         print("LinkedMesh error: Skin not found: " .. tostring(linkedMesh.skinName))
-        goto continue 
+        goto continue
     end
-    
+
     local parent = skin:getAttachment(self:findSlotIndex(linkedMesh.slotName), linkedMesh.parentName)
     if not parent then
         print("LinkedMesh error: Parent mesh not found: " .. tostring(linkedMesh.parentName))
-        goto continue 
+        goto continue
     end
-    
+
     linkedMesh.mesh.parentMesh = parent
     linkedMesh.mesh.inheritDeform = linkedMesh.inheritTimeline -- Set inheritDeform property
     linkedMesh.mesh:updateRegion()
-    
+
     -- Copy properties from parent
     linkedMesh.mesh.bones = parent.bones
     linkedMesh.mesh.weights = parent.weights
@@ -2479,7 +2479,7 @@ function SkeletonData:linkMeshes()
                   linkedMesh.mesh.region = region
               end
           end
-          
+
           -- Fallback to parent region if still nil
           if not linkedMesh.mesh.region and parent.region then
                linkedMesh.mesh.region = parent.region
@@ -2490,7 +2490,7 @@ function SkeletonData:linkMeshes()
                print("Error: LinkedMesh has no region and could not resolve it: " .. (linkedMesh.mesh.name or "unnamed") .. " (path: " .. tostring(linkedMesh.mesh.path) .. ")")
           end
      end
-    
+
     if linkedMesh.mesh.updateRegion then
         linkedMesh.mesh:updateRegion()
     else
@@ -2578,13 +2578,13 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
             attachment.regionUVs[i] = v
         end
     end
-    
+
     attachment.uvs = {}
     -- Initialize uvs with 0 (will be updated by updateRegion)
     for i = 1, #attachmentMap.uvs do
         attachment.uvs[i] = 0
     end
-    
+
     attachment.worldVerticesLength = #attachment.uvs
 
     -- Convert triangles to 1-based indices for Lua/Love2D
@@ -2671,7 +2671,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     else
         attachment.length = 0
     end
-    
+
     if attachmentMap.color then
       attachment.color:fromHex(attachmentMap.color)
     end
@@ -2680,10 +2680,10 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
         local jsonVertices = attachmentMap.vertices
         local vertexCount = attachmentMap.vertexCount or 0
         attachment.worldVerticesLength = vertexCount * 2
-        
+
         -- Logic to detect weighted vs non-weighted
         local isWeighted = #jsonVertices > vertexCount * 2
-        
+
         if not isWeighted then
             -- Non-weighted
             attachment.vertices = {}
@@ -2727,7 +2727,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
             end
         end
     end
-    
+
     return attachment
   elseif attachmentType == "boundingbox" then
     local attachment = BoundingBoxAttachment.new(attachmentName)
@@ -2784,7 +2784,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     if attachmentLoader and attachmentLoader.newMeshAttachment then
         attachment = attachmentLoader:newMeshAttachment(nil, attachmentName, path)
     end
-    
+
     if not attachment then
         attachment = MeshAttachment.new(attachmentName)
     end
@@ -2793,9 +2793,9 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
     if attachmentMap.color then
       attachment.color:fromHex(attachmentMap.color)
     end
-    
+
     local inheritDeform = attachmentMap.deform
-    
+
     table.insert(self.linkedMeshes, {
         mesh = attachment,
         skinName = attachmentMap.skin,
@@ -2804,7 +2804,7 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
         inheritTimeline = inheritDeform,
         loader = attachmentLoader -- Save loader for later resolution
     })
-    
+
     return attachment
   elseif attachmentType == "clipping" then
     local attachment
@@ -2825,10 +2825,10 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
         local vertexCount = attachmentMap.vertexCount or 0
         attachment.worldVerticesLength = vertexCount * 2
         attachment.vertexCount = vertexCount
-        
+
         -- Logic to detect weighted vs non-weighted
         local isWeighted = #jsonVertices > vertexCount * 2
-        
+
         if not isWeighted then
             -- Non-weighted
             attachment.vertices = {}
@@ -2840,30 +2840,30 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
             attachment.vertices = {}
             attachment.bones = {}
             attachment.weights = {}
-            
+
             local v = 1
             local b = 1
             local w = 1
             local i = 1
-            
+
             while i <= #jsonVertices do
                 local boneCount = jsonVertices[i]
                 attachment.bones[b] = boneCount
                 b = b + 1
                 i = i + 1
-                
+
                 for _ = 1, boneCount do
                     -- Bone index (JSON is 0-based, Lua is 1-based)
                     attachment.bones[b] = jsonVertices[i] + 1
                     b = b + 1
                     i = i + 1
-                    
+
                     -- Vertex x, y
                     attachment.vertices[v] = jsonVertices[i] * self.scale
                     attachment.vertices[v+1] = jsonVertices[i+1] * self.scale
                     v = v + 2
                     i = i + 2
-                    
+
                     -- Weight
                     attachment.weights[w] = jsonVertices[i]
                     w = w + 1

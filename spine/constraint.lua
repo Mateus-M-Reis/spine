@@ -2,7 +2,6 @@
 -- Implements IK, transform, and path constraints for bone manipulation
 
 local mathModule = require("spine.math")
-local utilsModule = require("spine.utils")
 
 local math_abs = math.abs
 local math_atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
@@ -13,7 +12,6 @@ local math_sqrt = math.sqrt
 local math_rad = math.rad
 local math_deg = math.deg
 local math_acos = math.acos
-local math_asin = math.asin
 local math_pi = math.pi
 
 
@@ -31,7 +29,7 @@ function IkConstraint.new(data, skeleton)
     self.compress = data.compress
     self.stretch = data.stretch
     self.uniform = data.uniform
-    
+
     -- Find bones
     for _, boneData in ipairs(data.bones) do
         local bone = skeleton:findBone(boneData.name)
@@ -39,7 +37,7 @@ function IkConstraint.new(data, skeleton)
             table.insert(self.bones, bone)
         end
     end
-    
+
     -- Find target bone
     if data.target then
         self.target = skeleton:findBone(data.target.name)
@@ -57,7 +55,7 @@ function IkConstraint.new(data, skeleton)
             end
         end
     end
-    
+
     if isReverse then
         -- print("PathConstraint: Detected reverse bone order for " .. data.name .. ". Reversing...")
         local reversed = {}
@@ -66,7 +64,7 @@ function IkConstraint.new(data, skeleton)
         end
         self.bones = reversed
     end
-    
+
     return self
 end
 
@@ -95,18 +93,18 @@ function IkConstraint:apply1(bone, target, alpha)
     local tx = (x * pp.d - y * pp.b) * id - bone.x
     local ty = (y * pp.a - x * pp.c) * id - bone.y
     local rotationIK = math_deg(math_atan2(ty, tx))
-    
+
     if bone.scaleX < 0 then rotationIK = rotationIK + 180 end
-    
+
     if rotationIK > 180 then rotationIK = rotationIK - 360
     elseif rotationIK < -180 then rotationIK = rotationIK + 360 end
-    
+
     local rotation = bone.rotation
     local r = rotationIK - rotation
-    
+
     if r > 180 then r = r - 360
     elseif r < -180 then r = r + 360 end
-    
+
     bone.rotation = rotation + r * alpha
     bone:updateWorldTransform()
 end
@@ -119,14 +117,14 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
         child:updateWorldTransform()
         return
     end
-    
+
     local px = parent.x
     local py = parent.y
     local psx = parent.scaleX
     local psy = parent.scaleY
     local csx = child.scaleX
     local os1, os2, s2
-    
+
     if psx < 0 then
         psx = -psx
         os1 = 180
@@ -135,28 +133,28 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
         os1 = 0
         s2 = 1
     end
-    
+
     if psy < 0 then
         psy = -psy
         s2 = -s2
     end
-    
+
     if csx < 0 then
         csx = -csx
         os2 = 180
     else
         os2 = 0
     end
-    
+
     local cx = child.x
     local cy, cwx, cwy
     local a = parent.a
     local b = parent.b
     local c = parent.c
     local d = parent.d
-    
+
     local u = math_abs(psx - psy) <= 0.0001
-    
+
     if not u or stretch then
         cy = 0
         cwx = a * cx + parent.worldX
@@ -166,37 +164,37 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
         cwx = a * cx + b * cy + parent.worldX
         cwy = c * cx + d * cy + parent.worldY
     end
-    
+
     local pp = parent.parent
     a = pp.a
     b = pp.b
     c = pp.c
     d = pp.d
-    
+
     local id = a * d - b * c
     local x = cwx - pp.worldX
     local y = cwy - pp.worldY
-    
+
     if math_abs(id) <= 0.0001 then id = 0 else id = 1 / id end
-    
+
     local dx = (x * d - y * b) * id - px
     local dy = (y * a - x * c) * id - py
     local l1 = math_sqrt(dx * dx + dy * dy)
     local l2 = child.data.length * csx
     local a1, a2
-    
+
     if l1 < 0.0001 then
         self:apply1(parent, target, alpha)
         child:updateWorldTransform(cx, cy, 0, child.scaleX, child.scaleY, child.shearX, child.shearY)
         return
     end
-    
+
     x = target.worldX - pp.worldX
     y = target.worldY - pp.worldY
     local tx = (x * d - y * b) * id - px
     local ty = (y * a - x * c) * id - py
     local dd = tx * tx + ty * ty
-    
+
     if self.softness and self.softness ~= 0 then
         local softness = self.softness * psx * (csx + 1) * 0.5
         local td = math_sqrt(dd)
@@ -209,9 +207,9 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
             dd = tx * tx + ty * ty
         end
     end
-    
+
     local outer_break = false
-    
+
     if u then
         l2 = l2 * psx
         local cos = (dd - l1 * l1 - l2 * l2) / (2 * l1 * l2)
@@ -232,7 +230,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
         else
             a2 = math_acos(cos) * bendDirection
         end
-        
+
         local a_val = l1 + l2 * cos
         local b_val = l2 * math_sin(a2)
         a1 = math_atan2(ty * a_val - tx * b_val, tx * a_val + ty * b_val)
@@ -246,7 +244,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
         local c1 = -2 * bb * l1
         local c2 = bb - aa
         local d_val = c1 * c1 - 4 * c2 * c_val
-        
+
         if d_val >= 0 then
             local q = math_sqrt(d_val)
             if c1 < 0 then q = -q end
@@ -261,7 +259,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
                 outer_break = true
             end
         end
-        
+
         if not outer_break then
              local minAngle = math_pi
              local minX = l1 - a_val
@@ -271,7 +269,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
              local maxX = l1 + a_val
              local maxDist = maxX * maxX
              local maxY = 0
-             
+
              local c0 = -a_val * l1 / (aa - bb)
              if c0 >= -1 and c0 <= 1 then
                  c0 = math_acos(c0)
@@ -291,7 +289,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
                      maxY = y_val
                  end
              end
-             
+
              if dd <= (minDist + maxDist) * 0.5 then
                  a1 = ta - math_atan2(minY * bendDirection, minX)
                  a2 = minAngle * bendDirection
@@ -301,7 +299,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
              end
         end
     end
-    
+
     local os = math_atan2(cy, cx) * s2
     local rotation = parent.rotation
     a1 = (a1 - os) * math_deg(1) + os1 - rotation
@@ -310,7 +308,7 @@ function IkConstraint:apply2(parent, child, target, alpha, bendDirection, compre
     if parent.scaleX < 0 then parent.scaleX = -psx else parent.scaleX = psx end
     if parent.scaleY < 0 then parent.scaleY = -psy else parent.scaleY = psy end
     parent:updateWorldTransform()
-    
+
     rotation = child.rotation
     a2 = ((a2 + os) * math_deg(1) - child.shearX) * s2 + os2 - rotation
     if a2 > 180 then a2 = a2 - 360 elseif a2 < -180 then a2 = a2 + 360 end
@@ -333,7 +331,7 @@ function TransformConstraint.new(data, skeleton)
     self.mixScaleX = data.mixScaleX or 0
     self.mixScaleY = data.mixScaleY or 0
     self.mixShearY = data.mixShearY or 0
-    
+
     -- Store offset values
     self.offsetX = data.offsetX or 0
     self.offsetY = data.offsetY or 0
@@ -341,11 +339,11 @@ function TransformConstraint.new(data, skeleton)
     self.offsetScaleX = data.offsetScaleX or 0
     self.offsetScaleY = data.offsetScaleY or 0
     self.offsetShearY = data.offsetShearY or 0
-    
+
     self.local_ = data.local_
     if self.local_ == nil then self.local_ = false end
     self.relative = data.relative or false
-    
+
     -- Find bones
     self.bones = {}
     for i, boneData in ipairs(data.bones) do
@@ -353,10 +351,10 @@ function TransformConstraint.new(data, skeleton)
         if not bone then error("TransformConstraint bone not found: " .. boneData.name) end
         table.insert(self.bones, bone)
     end
-    
+
     self.target = skeleton:findBone(data.target.name)
     if not self.target then error("TransformConstraint target bone not found: " .. data.target.name) end
-    
+
     return self
 end
 
@@ -648,14 +646,14 @@ function PathConstraint.new(data, skeleton)
     self.mixRotate = data.mixRotate
     self.mixX = data.mixX
     self.mixY = data.mixY
-    
+
     self.spaces = {}
     self.positions = {}
     self.world = {}
     self.curves = {}
     self.lengths = {}
     self.segments = {}
-    
+
     -- Find bones
     for _, boneData in ipairs(data.bones) do
         local bone = skeleton:findBone(boneData.name)
@@ -663,8 +661,8 @@ function PathConstraint.new(data, skeleton)
             table.insert(self.bones, bone)
         end
     end
-    
-    
+
+
     return self
 end
 
@@ -678,7 +676,7 @@ end
 
 function PathConstraint:apply()
     if #self.bones == 0 or not self.target or not self.target.attachment then return end
-    
+
     local attachment = self.target.attachment
     if attachment.type ~= "path" then return end
 
@@ -686,18 +684,18 @@ function PathConstraint:apply()
     local mixX = self.mixX
     local mixY = self.mixY
     if mixRotate == 0 and mixX == 0 and mixY == 0 then return end
-    
+
     local data = self.data
     local tangents = data.rotateMode == "tangent"
     local scale = data.rotateMode == "chainScale"
-    
+
     local boneCount = #self.bones
     local spacesCount = tangents and boneCount or boneCount + 1
-    
+
     local spaces = self.spaces
     local lengths = self.lengths
     local spacing = self.spacing
-    
+
     if data.spacingMode == "percent" then
         if scale then
             for i = 1, spacesCount - 1 do
@@ -709,7 +707,7 @@ function PathConstraint:apply()
             end
         end
         for i = 2, spacesCount do spaces[i] = spacing end
-        
+
     elseif data.spacingMode == "proportional" then
         local sum = 0
         local i = 0
@@ -736,7 +734,7 @@ function PathConstraint:apply()
                 spaces[j] = spaces[j] * sum
             end
         end
-        
+
     else -- length or fixed
         local lengthSpacing = data.spacingMode == "length"
         local i = 0
@@ -761,14 +759,14 @@ function PathConstraint:apply()
             end
         end
     end
-    
+
     local positions = self:computeWorldPositions(attachment, spacesCount, tangents, data.positionMode == "percent", data.spacingMode)
-    
+
     local boneX = positions[1]
     local boneY = positions[2]
     local offsetRotation = data.offsetRotation
     local tip = false
-    
+
     if offsetRotation == 0 then
         tip = data.rotateMode == "chain"
     else
@@ -776,19 +774,19 @@ function PathConstraint:apply()
         local p = self.target.bone
         offsetRotation = offsetRotation * (p.a * p.d - p.b * p.c > 0 and math_rad(1) or -math_rad(1))
     end
-    
+
     local p_idx = 4
     for i = 1, boneCount do
         local bone = self.bones[i]
-        
+
         bone.worldX = bone.worldX + (boneX - bone.worldX) * mixX
         bone.worldY = bone.worldY + (boneY - bone.worldY) * mixY
-        
+
         local x = positions[p_idx]
         local y = positions[p_idx + 1]
         local dx = x - boneX
         local dy = y - boneY
-        
+
         if scale then
             local length = lengths[i]
             if length >= 0.00001 then
@@ -797,17 +795,17 @@ function PathConstraint:apply()
                 bone.c = bone.c * s
             end
         end
-        
+
         boneX = x
         boneY = y
-        
+
         if mixRotate > 0 then
             local a = bone.a
             local b = bone.b
             local c = bone.c
             local d = bone.d
             local r, cos_r, sin_r
-            
+
             if tangents then
                 r = positions[p_idx - 1]
             elseif spaces[i + 1] == 0 then
@@ -815,9 +813,9 @@ function PathConstraint:apply()
             else
                 r = math_atan2(dy, dx)
             end
-            
+
             r = r - math_atan2(c, a)
-            
+
             if tip then
                 cos_r = math_cos(r)
                 sin_r = math_sin(r)
@@ -827,21 +825,21 @@ function PathConstraint:apply()
             else
                 r = r + offsetRotation
             end
-            
+
             if r > math_pi then r = r - (math_pi * 2)
             elseif r < -math_pi then r = r + (math_pi * 2) end
-            
+
             r = r * mixRotate
-            
+
             cos_r = math_cos(r)
             sin_r = math_sin(r)
-            
+
             bone.a = cos_r * a - sin_r * c
             bone.b = cos_r * b - sin_r * d
             bone.c = sin_r * a + cos_r * c
             bone.d = sin_r * b + cos_r * d
         end
-        
+
         p_idx = p_idx + 3
     end
 end
@@ -861,37 +859,36 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
     local verticesLength = path.worldVerticesLength
     local curveCount = verticesLength / 6
     local prevCurve = -1
-    
+
     if not path.constantSpeed then
         local lengths = path.lengths
         curveCount = curveCount - (closed and 1 or 2)
         local pathLength = lengths[curveCount + 1]
-        
+
             if percentPosition then position = position * pathLength end
-        
+
         local multiplier = 1
         if spacingMode == "percent" then
             multiplier = pathLength
         elseif spacingMode == "proportional" then
             multiplier = pathLength / spacesCount
         end
-        
+
         -- Fill world vertices
         if not world or #world ~= 8 then
              for i=1, 8 do world[i] = 0 end
         end
-        
+
         local o = 1
         for i = 1, spacesCount do
             local space = (spaces[i] or 0) * multiplier
-            
+
             position = position + space
             local p = position
-            
+
             if closed then
                 p = p % pathLength
                 if p < 0 then p = p + pathLength end
-                curve = 0
             elseif p < 0 then
                 if prevCurve ~= -2 then
                     prevCurve = -2
@@ -909,7 +906,7 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
                 o = o + 3
                 goto continue
             end
-            
+
             -- Determine curve
             local curve = 0
             while true do
@@ -926,7 +923,7 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
                     break
                 end
             end
-            
+
             if curve ~= prevCurve then
                 prevCurve = curve
                 if closed and curve == curveCount then
@@ -936,15 +933,15 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
                     path:computeWorldVertices(target, curve * 6 + 2, 8, world, 0, 2)
                 end
             end
-            
+
             addCurvePosition(p, world[1], world[2], world[3], world[4], world[5], world[6], world[7], world[8], out, o, tangents or (i > 1 and space < 0.00001))
             o = o + 3
-            
+
             ::continue::
         end
         return out
     end
-    
+
     -- Constant speed
     if closed then
         verticesLength = verticesLength + 2
@@ -957,16 +954,16 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
         verticesLength = verticesLength - 4
         path:computeWorldVertices(target, 2, verticesLength, world, 0, 2)
     end
-    
+
     -- Curve lengths
     local curves = self.curves
     local pathLength = 0
     local x1 = world[1]
     local y1 = world[2]
-    
+
     local cx1, cy1, cx2, cy2, x2, y2
     local tmpx, tmpy, dddfx, dddfy, ddfx, ddfy, dfx, dfy
-    
+
     local w = 3
     for i = 0, curveCount - 1 do
         cx1 = world[w]
@@ -1000,28 +997,28 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
         y1 = y2
         w = w + 6
     end
-    
+
     if percentPosition then position = position * pathLength end
-    
+
     local multiplier = 1
     if spacingMode == "percent" then
         multiplier = pathLength
     elseif spacingMode == "proportional" then
         multiplier = pathLength / spacesCount
     end
-    
+
     local segments = self.segments
     local curveLength = 0
     local o = 1
     local curve = 0
     local prevCurve = -1
     local segment = 0
-    
+
     for i = 1, spacesCount do
         local space = (spaces[i] or 0) * multiplier
         position = position + space
         local p = position
-        
+
         if closed then
             p = p % pathLength
             if p < 0 then p = p + pathLength end
@@ -1031,13 +1028,13 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
             o = o + 3
             goto continue
         elseif p > pathLength then
-            -- addAfterPosition uses index of x1,y1. For the last segment, this corresponds to 
+            -- addAfterPosition uses index of x1,y1. For the last segment, this corresponds to
             -- index verticesLength - 3 (since last point is at verticesLength-1, verticesLength)
             addAfterPosition(p - pathLength, world, verticesLength - 3, out, o)
             o = o + 3
             goto continue
         end
-        
+
         while true do
             local length = curves[curve + 1]
             if p > length then
@@ -1052,7 +1049,7 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
                 break
             end
         end
-        
+
         if curve ~= prevCurve then
             prevCurve = curve
             local ii = curve * 6 + 1 -- Lua 1-based
@@ -1092,7 +1089,7 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
             segments[10] = curveLength
             segment = 0
         end
-        
+
         p = p * curveLength
         while true do
             local length = segments[segment + 1]
@@ -1108,10 +1105,10 @@ function PathConstraint:computeWorldPositions(path, spacesCount, tangents, perce
                 break
             end
         end
-        
+
         addCurvePosition(p * 0.1, x1, y1, cx1, cy1, cx2, cy2, x2, y2, out, o, tangents or (i > 1 and space < 0.00001))
         o = o + 3
-        
+
         ::continue::
     end
     return out
@@ -1132,7 +1129,7 @@ function PhysicsConstraint.new(data, skeleton)
     self.wind = data.wind
     self.gravity = data.gravity
     self.mix = data.mix
-    
+
     self.reset = true
     self.ux = 0
     self.uy = 0
@@ -1151,7 +1148,7 @@ function PhysicsConstraint.new(data, skeleton)
     self.active = false
     self.remaining = 0
     self.lastTime = 0
-    
+
     return self
 end
 
@@ -1178,11 +1175,11 @@ function PhysicsConstraint:update(physics)
     local y = data._y > 0
     local rotateOrShearX = data._rotate > 0 or data._shearX > 0
     local scaleX = data._scaleX > 0
-    
+
     local bone = self.bone
     local l = bone.data.length
     local appliedLocal = false
-    
+
     if physics == "reset" then
         self.remaining = 0
         self.lastTime = self.skeleton.time
@@ -1197,16 +1194,16 @@ function PhysicsConstraint:update(physics)
         self.scaleVelocity = 0
         -- fallthrough
     end
-    
+
     if physics == "update" or physics == "reset" then
         local time = self.skeleton.time
         local delta = math.max(time - self.lastTime, 0)
         self.remaining = self.remaining + delta
         self.lastTime = time
-        
+
         local bx = bone.worldX
         local by = bone.worldY
-        
+
         if self.reset then
             self.reset = false
             self.ux = bx
@@ -1223,24 +1220,24 @@ function PhysicsConstraint:update(physics)
             self.rotateVelocity = 0
             self.scaleOffset = 0
             self.scaleVelocity = 0
-            self.remaining = 0 
+            self.remaining = 0
         else
             local a = self.remaining
             local i = self.inertia
             local t = data._step
             if t == 0 then t = 1/60 end
             local f = self.skeleton.data.referenceScale or 100
-            
+
             local sx = math.abs(self.skeleton.scaleX or 1)
             local sy = math.abs(self.skeleton.scaleY or 1)
-            
+
             local limitDelta = data._limit * delta
             local qx = limitDelta * sx
             local qy = limitDelta * sy
 
             -- Gravity is scaled by the skeleton's Y scale; wind by X.
             local gApplied = -self.gravity * f * sy
-            
+
             if x or y then
                 if x then
                     local u = (self.ux - bx) * i
@@ -1254,13 +1251,13 @@ function PhysicsConstraint:update(physics)
                     self.yOffset = self.yOffset + u
                     self.uy = by
                 end
-                
+
                 if a >= t then
                     local d = math.pow(self.damping, 60 * t)
                     local m = self.massInverse * t
                     local e = self.strength
                     local w = self.wind * f * sx
-                    
+
                     while a >= t do
                         if x then
                             self.xVelocity = self.xVelocity + (w - self.xOffset * e) * m
@@ -1275,7 +1272,7 @@ function PhysicsConstraint:update(physics)
                         a = a - t
                     end
                 end
-                
+
                 local targetX = bone.worldX
                 local targetY = bone.worldY
                 if x then targetX = targetX + self.xOffset * mix * data._x end
@@ -1298,28 +1295,28 @@ function PhysicsConstraint:update(physics)
                     if x or y then appliedLocal = true end
                 end
             end
-            
+
             if rotateOrShearX or scaleX then
                 local ca = math.atan2(bone.c, bone.a)
                 local c, s
                 local mr = 0
                 local dx = self.cx - bone.worldX
                 local dy = self.cy - bone.worldY
-                
+
                 if dx > qx then dx = qx elseif dx < -qx then dx = -qx end
                 if dy > qy then dy = qy elseif dy < -qy then dy = -qy end
-                
+
                 if rotateOrShearX then
                     mr = (data._rotate + data._shearX) * mix
                     local r = math.atan2(dy + self.ty, dx + self.tx) - ca - self.rotateOffset * mr
                     local Pi_2 = math.pi * 2
                     r = r - math.ceil(r / Pi_2 - 0.5) * Pi_2
-                    
+
                     self.rotateOffset = self.rotateOffset + r * i
                     r = self.rotateOffset * mr + ca
                     c = math.cos(r)
                     s = math.sin(r)
-                    
+
                     if scaleX then
                         local wsx = math.sqrt(bone.a * bone.a + bone.c * bone.c)
                         local r_val = l * wsx
@@ -1336,7 +1333,7 @@ function PhysicsConstraint:update(physics)
                         self.scaleOffset = self.scaleOffset + (dx * c + dy * s) * i / r_val
                     end
                 end
-                
+
                 a = self.remaining
                 if a >= t then
                     local m = self.massInverse * t
@@ -1346,10 +1343,10 @@ function PhysicsConstraint:update(physics)
                     -- Reference C++: g = _gravity * (Bone::yDown ? -1 : 1)
                     -- Love2D is y-down, so we might need to flip gravity
                     local g = self.gravity * -1
-                    
+
                     local h = l / f
                     local d = math.pow(self.damping, 60 * t)
-                    
+
                     while true do
                         a = a - t
                         if scaleX then
@@ -1361,7 +1358,7 @@ function PhysicsConstraint:update(physics)
                             self.rotateVelocity = self.rotateVelocity - ((w * s + g * c) * h + self.rotateOffset * e) * m
                             self.rotateOffset = self.rotateOffset + self.rotateVelocity * t
                             self.rotateVelocity = self.rotateVelocity * d
-                            
+
                             if a < t then break end
                             local r = self.rotateOffset * mr + ca
                             c = math.cos(r)
@@ -1371,24 +1368,24 @@ function PhysicsConstraint:update(physics)
                         end
                     end
                 end
-                
+
                 self.remaining = a
             end
-            
+
             -- Ensure remaining time is updated even if only x/y are active
             if (x or y) and not (rotateOrShearX or scaleX) then
                 self.remaining = a
             end
-            
-            
+
+
         end
     elseif physics == "pose" then
         if x then bone.worldX = bone.worldX + self.xOffset * mix * data._x end
         if y then bone.worldY = bone.worldY + self.yOffset * mix * data._y end
     end
-    
+
     if appliedLocal then bone:updateWorldTransform() end
-    
+
     if rotateOrShearX then
         local o = self.rotateOffset * mix
         local s, c, a
@@ -1420,26 +1417,26 @@ function PhysicsConstraint:update(physics)
              bone.d = s * a + c * bone.d
         end
     end
-    
+
     if scaleX then
         local s = 1 + self.scaleOffset * mix * data._scaleX
         bone.a = bone.a * s
         bone.c = bone.c * s
     end
-    
+
     if physics ~= "pose" then
         self.tx = l * bone.a
         self.ty = l * bone.c
     end
-    
+
     self.cx = bone.worldX
     self.cy = bone.worldY
-    
+
     bone.appliedRotation = math.deg(math.atan2(bone.c, bone.a))
     bone.worldRotation = bone.appliedRotation
     bone.worldScaleX = math.sqrt(bone.a * bone.a + bone.c * bone.c)
     bone.worldScaleY = math.sqrt(bone.b * bone.b + bone.d * bone.d)
-    
+
     if bone.children then
         for _, child in ipairs(bone.children) do
             child:updateWorldTransformWithChildren()
@@ -1459,13 +1456,13 @@ end
 function ConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local constraint = skeleton.constraints[self.constraintIndex]
     if not constraint then return end
-    
+
     local frames = self.frames
-    
+
     if time < frames[0] then
         return
     end
-    
+
     local value = 0
     if time >= frames[self.frameCount * 2 - 2] then
         value = frames[self.frameCount * 2 - 1]
@@ -1476,7 +1473,7 @@ function ConstraintTimeline:apply(skeleton, lastTime, time, events, alpha, blend
         local percent = self:getCurvePercent(frameIndex / 2 - 1, 1 - (time - after) / (before - after))
         value = before + (frames[frameIndex + 1] - before) * percent
     end
-    
+
     self:applyConstraint(constraint, value, alpha)
 end
 

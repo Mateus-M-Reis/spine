@@ -1,10 +1,10 @@
 -- Spine LÖVR Runtime - Main Entry Point
--- Version: 1.2.1
+-- Version: 1.3.0
 
 local spine = {}
 
 -- Version information
-spine.version = "1.2.1"
+spine.version = "1.3.0"
 spine.spineVersion = "4.2.x"
 spine.lovrVersion = "0.18+"
 
