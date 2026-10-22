@@ -1,17 +1,16 @@
-// Regenerates pose_expected.json with the official Spine 4.2 runtime.
+// Regenerates the reference fixtures with the official Spine 4.2 runtime.
 //
 //   npm install --no-save @esotericsoftware/spine-core@4.2.120
 //   node tests/fixtures/reference/generate.js
 //
-// The checked-in output was generated with @esotericsoftware/spine-core 4.2.120.
+// The checked-in outputs were generated with @esotericsoftware/spine-core
+// 4.2.120. None of these fixtures contain attachments.
 const fs = require("fs");
 const path = require("path");
 const spine = require("@esotericsoftware/spine-core");
 
 const here = __dirname;
-const input = JSON.parse(fs.readFileSync(path.join(here, "pose_input.json")));
 
-// The fixture intentionally has no attachments; fail loudly if that changes.
 const loader = {
   newRegionAttachment: () => { throw new Error("fixture must not contain attachments"); },
   newMeshAttachment: () => { throw new Error("fixture must not contain attachments"); },
@@ -21,28 +20,108 @@ const loader = {
   newClippingAttachment: () => { throw new Error("fixture must not contain attachments"); },
 };
 
-const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
-const skeleton = new spine.Skeleton(skeletonData);
-const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
-state.setAnimation(0, "move", false);
+function readInput(name) {
+  return JSON.parse(fs.readFileSync(path.join(here, name), "utf8"));
+}
 
-const times = [0, 0.25, 0.5, 0.75, 1];
-const output = { times, bones: {} };
-let previousTime = 0;
+function writeOutput(name, value) {
+  fs.writeFileSync(path.join(here, name), JSON.stringify(value, null, 2) + "\n");
+}
 
-for (const time of times) {
-  state.update(time - previousTime);
-  state.apply(skeleton);
-  skeleton.updateWorldTransform(spine.Physics.update);
-  previousTime = time;
-
-  output.bones[time] = {};
+function boneMatrices(skeleton) {
+  const out = {};
   for (const bone of skeleton.bones) {
-    output.bones[time][bone.data.name] = [
+    out[bone.data.name] = [
       bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
     ];
   }
+  return out;
 }
 
-fs.writeFileSync(path.join(here, "pose_expected.json"), JSON.stringify(output, null, 2) + "\n");
-console.log("wrote pose_expected.json");
+function generatePose() {
+  const input = readInput("pose_input.json");
+  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+  const skeleton = new spine.Skeleton(skeletonData);
+  const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+  state.setAnimation(0, "move", false);
+
+  const times = [0, 0.25, 0.5, 0.75, 1];
+  const output = { times, bones: {} };
+  let previousTime = 0;
+
+  for (const time of times) {
+    state.update(time - previousTime);
+    state.apply(skeleton);
+    skeleton.updateWorldTransform(spine.Physics.update);
+    previousTime = time;
+    output.bones[time] = boneMatrices(skeleton);
+  }
+
+  writeOutput("pose_expected.json", output);
+}
+
+function generateTimelines() {
+  const input = readInput("timeline_input.json");
+  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+  const output = {
+    loop: { times: [], bones: {} },
+    multitrack: { times: [], bones: {} },
+  };
+
+  {
+    const skeleton = new spine.Skeleton(skeletonData);
+    skeleton.setToSetupPose();
+    const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+    state.setAnimation(0, "loop", true);
+    let previousTime = 0;
+    for (const time of [0, 0.25, 0.5, 0.6, 0.75, 1.1, 1.4]) {
+      state.update(time - previousTime);
+      state.apply(skeleton);
+      skeleton.updateWorldTransform(spine.Physics.update);
+      previousTime = time;
+      output.loop.times.push(time);
+      output.loop.bones[time] = boneMatrices(skeleton);
+    }
+  }
+
+  {
+    const skeleton = new spine.Skeleton(skeletonData);
+    skeleton.setToSetupPose();
+    const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+    state.setAnimation(0, "base", true);
+    state.setAnimation(1, "overlay", true);
+    state.tracks[1].alpha = 0.5;
+    let previousTime = 0;
+    for (const time of [0, 0.25, 0.5, 0.75, 1.1]) {
+      state.update(time - previousTime);
+      state.apply(skeleton);
+      skeleton.updateWorldTransform(spine.Physics.update);
+      previousTime = time;
+      output.multitrack.times.push(time);
+      output.multitrack.bones[time] = boneMatrices(skeleton);
+    }
+  }
+
+  writeOutput("timeline_expected.json", output);
+}
+
+function generateIK() {
+  const input = readInput("ik_input.json");
+  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+  const skeleton = new spine.Skeleton(skeletonData);
+  skeleton.setToSetupPose();
+  skeleton.updateWorldTransform(spine.Physics.update);
+
+  const output = {};
+  for (const bone of skeleton.bones) {
+    output[bone.data.name] = [
+      bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d, bone.rotation,
+    ];
+  }
+  writeOutput("ik_expected.json", output);
+}
+
+generatePose();
+generateTimelines();
+generateIK();
+console.log("wrote pose, timeline, and IK reference fixtures");

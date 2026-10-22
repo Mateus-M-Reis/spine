@@ -1,0 +1,33 @@
+{
+  "skeleton": { "spine": "4.2.00", "width": 100, "height": 100 },
+  "bones": [
+    { "name": "root" },
+    { "name": "child", "parent": "root", "x": 10, "y": 5 }
+  ],
+  "slots": [],
+  "skins": {},
+  "animations": {
+    "loop": {
+      "bones": {
+        "child": {
+          "rotate": [ { "time": 0, "value": 0 }, { "time": 0.5, "value": 90 } ]
+        }
+      }
+    },
+    "base": {
+      "bones": {
+        "child": {
+          "rotate": [ { "time": 0, "value": 0 }, { "time": 1, "value": 30 } ]
+        }
+      }
+    },
+    "overlay": {
+      "bones": {
+        "child": {
+          "rotate": [ { "time": 0, "value": 0 }, { "time": 1, "value": 45 } ],
+          "translate": [ { "time": 0, "x": 0, "y": 0 }, { "time": 1, "x": 20, "y": 10 } ]
+        }
+      }
+    }
+  }
+}

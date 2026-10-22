@@ -62,7 +62,13 @@
           "rotate": [
             {
               "time": 0,
-              "value": 30
+              "value": 30,
+              "curve": [
+                0.1,
+                40,
+                0.3,
+                50
+              ]
             },
             {
               "time": 0.5,
@@ -90,7 +96,8 @@
           "rotate": [
             {
               "time": 0,
-              "value": -45
+              "value": -45,
+              "curve": "stepped"
             },
             {
               "time": 0.5,

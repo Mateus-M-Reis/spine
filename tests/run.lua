@@ -858,6 +858,97 @@ do
 end
 
 ---------------------------------------------------------------------------
+section("reference timelines: looping and multi-track playback")
+
+do
+  local input = lovr.filesystem.read("tests/fixtures/reference/timeline_input.json")
+  local expectedText = lovr.filesystem.read("tests/fixtures/reference/timeline_expected.json")
+  check(input ~= nil and expectedText ~= nil, "timeline reference fixtures readable")
+
+  local data = spine.utils.jsonDecode(input)
+  local expected = spine.utils.jsonDecode(expectedText)
+  check(data ~= nil and expected ~= nil, "timeline reference fixtures parse")
+
+  local function compareBone(bone, reference, label, time)
+    local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+    for i = 1, 6 do
+      if not approx(actual[i], reference[i], 1e-4) then
+        return string.format("%s[%d] at t=%.3f: %.6f ~= %.6f",
+          label, i, time, actual[i], reference[i])
+      end
+    end
+    return nil
+  end
+
+  local loopInst = spine.loadSkeleton(data)
+  local loopState = loopInst.animationState
+  loopState:setAnimation(0, "loop", true)
+  local previousTime = 0
+  for _, time in ipairs(expected.loop.times) do
+    loopState:update(time - previousTime)
+    loopState:apply(loopInst.skeleton)
+    loopInst.skeleton:updateWorldTransform()
+    previousTime = time
+    local mismatch = compareBone(loopInst.skeleton:findBone("child"),
+      expected.loop.bones[tostring(time)].child, "loop child", time)
+    check(mismatch == nil, mismatch or ("looping reference matches at t=" .. time))
+  end
+  spine.release(loopInst)
+
+  local multiInst = spine.loadSkeleton(data)
+  local multiState = multiInst.animationState
+  multiState:setAnimation(0, "base", true)
+  multiState:setAnimation(1, "overlay", true)
+  multiState.tracks[1].alpha = 0.5
+  previousTime = 0
+  for _, time in ipairs(expected.multitrack.times) do
+    multiState:update(time - previousTime)
+    multiState:apply(multiInst.skeleton)
+    multiInst.skeleton:updateWorldTransform()
+    previousTime = time
+    local mismatch = compareBone(multiInst.skeleton:findBone("child"),
+      expected.multitrack.bones[tostring(time)].child, "multitrack child", time)
+    check(mismatch == nil, mismatch or ("multi-track reference matches at t=" .. time))
+  end
+  spine.release(multiInst)
+end
+
+---------------------------------------------------------------------------
+section("reference constraints: IK")
+
+do
+  local input = lovr.filesystem.read("tests/fixtures/reference/ik_input.json")
+  local expectedText = lovr.filesystem.read("tests/fixtures/reference/ik_expected.json")
+  check(input ~= nil and expectedText ~= nil, "IK reference fixtures readable")
+
+  local data = spine.utils.jsonDecode(input)
+  local expected = spine.utils.jsonDecode(expectedText)
+  check(data ~= nil and expected ~= nil, "IK reference fixtures parse")
+
+  local inst = spine.loadSkeleton(data)
+  inst.skeleton:updateWorldTransform()
+  local mismatch = nil
+  for _, bone in ipairs(inst.skeleton.bones) do
+    local reference = expected[bone.data.name]
+    if not reference then
+      mismatch = "missing IK reference for " .. bone.data.name
+      break
+    end
+    local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+    for i = 1, 6 do
+      if not approx(actual[i], reference[i], 1e-4) then
+        mismatch = string.format("IK %s[%d]: %.6f ~= %.6f",
+          bone.data.name, i, actual[i], reference[i])
+        break
+      end
+    end
+    if mismatch then break end
+  end
+  check(mismatch == nil, mismatch or "IK reference pose matches")
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
 section("transform constraints: world/local and relative modes")
 
 do

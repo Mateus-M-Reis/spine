@@ -1,0 +1,15 @@
+{
+  "skeleton": { "spine": "4.2.00", "width": 300, "height": 300 },
+  "bones": [
+    { "name": "root" },
+    { "name": "upper", "parent": "root", "length": 100, "rotation": 0 },
+    { "name": "lower", "parent": "upper", "length": 100, "x": 100, "rotation": 0 },
+    { "name": "target", "parent": "root", "x": 100, "y": 100 }
+  ],
+  "slots": [],
+  "skins": {},
+  "ik": [
+    { "name": "ik", "bones": ["upper", "lower"], "target": "target", "mix": 1, "bendPositive": true }
+  ],
+  "animations": {}
+}
