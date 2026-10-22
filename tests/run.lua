@@ -24,6 +24,10 @@ local function section(name)
   print("== " .. name)
 end
 
+local function approx(a, b, epsilon)
+  return math.abs(a - b) <= (epsilon or 1e-6)
+end
+
 local ROOT = "./examples/"
 
 local function assetPath(rel)
@@ -138,7 +142,7 @@ do
 
   local pass = stub.newPass()
   local materialsBefore = stub.counts.materials
-  stub.counts.verticesUploaded = 0
+  stub.counts.vertexFloatsUploaded = 0
 
   spine.draw(inst, pass, 0, 0, -2, 0.005, 0.005, 0.005, 0)
 
@@ -160,15 +164,15 @@ do
       expectedVertices = expectedVertices + #a.uvs / 2
     end
   end
-  check(stub.counts.verticesUploaded == expectedVertices,
-    string.format("no duplicated vertices uploaded (%d == %d)", stub.counts.verticesUploaded, expectedVertices))
+  check(stub.counts.vertexFloatsUploaded == expectedVertices * stub.VERTEX_COMPONENTS,
+    string.format("no duplicated vertex floats uploaded (%d == %d)", stub.counts.vertexFloatsUploaded, expectedVertices * stub.VERTEX_COMPONENTS))
 
   local materialsAfterFirst = stub.counts.materials
   check(materialsAfterFirst - materialsBefore == 1, "one material per texture page")
 
   -- Second frame must not create any new materials.
   pass.draws = 0
-  stub.counts.verticesUploaded = 0
+  stub.counts.vertexFloatsUploaded = 0
   spine.draw(inst, pass, 0, 0, -2, 0.005, 0.005, 0.005, 0)
   check(stub.counts.materials == materialsAfterFirst,
     "no new materials created on subsequent frames")
@@ -203,7 +207,7 @@ do
     "spine_playground/assets/coin/coin.atlas", 0.005)
 
   local pass = stub.newPass()
-  stub.counts.verticesUploaded = 0
+  stub.counts.vertexFloatsUploaded = 0
   spine.draw(inst, pass, 0, 0, -2, 0.005, 0.005, 0.005, 0)
 
   local expected = countDrawable(inst.skeleton)
@@ -219,8 +223,8 @@ do
       expectedVertices = expectedVertices + #a.uvs / 2
     end
   end
-  check(stub.counts.verticesUploaded == expectedVertices,
-    string.format("no duplicated vertices inside clipping (%d == %d)", stub.counts.verticesUploaded, expectedVertices))
+  check(stub.counts.vertexFloatsUploaded == expectedVertices * stub.VERTEX_COMPONENTS,
+    string.format("no duplicated vertex floats inside clipping (%d == %d)", stub.counts.vertexFloatsUploaded, expectedVertices * stub.VERTEX_COMPONENTS))
 
   local increments, decrements = 0, 0
   for _, mode in ipairs(pass.stencilWrites) do
@@ -266,7 +270,7 @@ do
     "spine_playground/assets/tank/tank-pro.atlas", 0.005)
 
   local pass = stub.newPass()
-  stub.counts.verticesUploaded = 0
+  stub.counts.vertexFloatsUploaded = 0
   spine.draw(inst, pass, 0, 0, -2, 0.005, 0.005, 0.005, 0)
 
   local expected = countDrawable(inst.skeleton)
@@ -283,8 +287,8 @@ do
       expectedVertices = expectedVertices + #a.uvs / 2
     end
   end
-  check(stub.counts.verticesUploaded == expectedVertices,
-    string.format("all vertices uploaded exactly once (%d == %d)", stub.counts.verticesUploaded, expectedVertices))
+  check(stub.counts.vertexFloatsUploaded == expectedVertices * stub.VERTEX_COMPONENTS,
+    string.format("all vertices uploaded exactly once (%d == %d floats)", stub.counts.vertexFloatsUploaded, expectedVertices * stub.VERTEX_COMPONENTS))
 end
 
 ---------------------------------------------------------------------------
@@ -445,6 +449,449 @@ do
 
   for _ = 1, 30 do spine.update(inst, 1 / 60) end
   check(state.tracks[0].animation.name == "run", "queued animation started after delay")
+end
+
+---------------------------------------------------------------------------
+section("render order: clipping and state changes keep attachment order")
+
+do
+  stub.passStencil = true
+
+  local function drawOrderFor(data)
+    local inst = spine.loadSkeleton(data,
+      assetPath("basic_usage/assets/spineboy/spineboy.atlas"), 1)
+    local order = {}
+    local originalFlush = inst.renderer.flushBatches
+    inst.renderer.flushBatches = function(self, batch, pass)
+      for _, group in ipairs(batch.order) do
+        table.insert(order, group.blendMode)
+      end
+      return originalFlush(self, batch, pass)
+    end
+
+    local pass = stub.newPass()
+    spine.draw(inst, pass, 0, 0, -2, 1, 1, 1, 0)
+    inst.renderer.flushBatches = originalFlush
+    return order
+  end
+
+  local region = { type = "region", path = "eye_indifferent", width = 10, height = 10 }
+  local clip = {
+    type = "clipping", vertexCount = 4,
+    vertices = { -50, -50, 50, -50, 50, 50, -50, 50 },
+  }
+
+  -- Interleaved normal/additive attachments must stay in slot order.
+  local interleaved = {
+    skeleton = { spine = "4.2.00", width = 100, height = 100 },
+    bones = { { name = "root" } },
+    slots = {
+      { name = "a", bone = "root", attachment = "img" },
+      { name = "b", bone = "root", attachment = "img", blend = "additive" },
+      { name = "c", bone = "root", attachment = "img" },
+    },
+    skins = { default = {
+      a = { img = region },
+      b = { img = region },
+      c = { img = region },
+    } },
+    animations = {},
+  }
+
+  local order = drawOrderFor(interleaved)
+  check(table.concat(order, ",") == "normal,additive,normal",
+    "interleaved states preserve order (got " .. table.concat(order, ",") .. ")")
+
+  -- A clipping attachment must not jump ahead of attachments before the clip.
+  local clipped = {
+    skeleton = { spine = "4.2.00", width = 100, height = 100 },
+    bones = { { name = "root" } },
+    slots = {
+      { name = "a", bone = "root", attachment = "img" },
+      { name = "clip", bone = "root", attachment = "clip" },
+      { name = "b", bone = "root", attachment = "img", blend = "additive" },
+    },
+    skins = { default = {
+      a = { img = region },
+      clip = { clip = clip },
+      b = { img = region },
+    } },
+    animations = {},
+  }
+
+  order = drawOrderFor(clipped)
+  check(table.concat(order, ",") == "normal,additive",
+    "clipped attachments keep pre-clip order (got " .. table.concat(order, ",") .. ")")
+end
+
+---------------------------------------------------------------------------
+section("colors: skeleton, slot, and attachment tints multiply")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/mix-and-match/mix-and-match-pro.json",
+    "spine_playground/assets/mix-and-match/mix-and-match-pro.atlas", 0.004)
+  inst.skeleton:setSkin("full-skins/girl")
+  inst.skeleton:setSlotsToSetupPose()
+  inst.skeleton:setColor(0.5, 0.25, 1, 0.5)
+
+  local slot = inst.skeleton:findSlot("hair-patch")
+  local attachment = slot and slot.attachment
+  check(slot ~= nil and attachment ~= nil and attachment.region ~= nil,
+    "hair-patch attachment loaded from the girl skin")
+
+  if attachment then
+    slot.darkColor = { r = 0.2, g = 0.4, b = 0.6, a = 1 }
+    local batch = { groups = {}, order = {}, lastKey = nil }
+    inst.renderer:collectAttachment(batch, slot, attachment, stub.newPass())
+    local group = batch.order[1]
+    local color
+    if group and group.vertices[9] then
+      -- Flat layout: x,y,z, u,v, r,g,b,a, darkR,darkG,darkB,darkA.
+      color = { group.vertices[6], group.vertices[7], group.vertices[8], group.vertices[9] }
+    end
+    check(color ~= nil, "collectAttachment produced a vertex color")
+
+    local alpha = 0.5 * slot.color.a * attachment.color.a
+    local expectedR = 0.5 * slot.color.r * attachment.color.r
+    local expectedG = 0.25 * slot.color.g * attachment.color.g
+    local expectedB = 1 * slot.color.b * attachment.color.b
+    if group and group.pma then
+      expectedR, expectedG, expectedB = expectedR * alpha, expectedG * alpha, expectedB * alpha
+    end
+
+    check(color and approx(color[1], expectedR) and approx(color[2], expectedG)
+      and approx(color[3], expectedB) and approx(color[4], alpha),
+      string.format("vertex color is skeleton*slot*attachment (got %.4f,%.4f,%.4f,%.4f)",
+        color and color[1] or -1, color and color[2] or -1,
+        color and color[3] or -1, color and color[4] or -1))
+
+    if group and group.pma and group.darkColor then
+      check(approx(group.darkColor.r, 0.2 * alpha)
+        and approx(group.darkColor.g, 0.4 * alpha)
+        and approx(group.darkColor.b, 0.6 * alpha),
+        "dark color is premultiplied by the final alpha")
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+section("deform timeline vertices are scaled with the skeleton")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/spineboy-pro/spineboy-pro.json",
+    "spine_playground/assets/spineboy-pro/spineboy-pro.atlas", 0.004)
+  local deformTimelines, maxAbs = 0, 0
+
+  for _, animation in pairs(inst.skeletonData.animations) do
+    for _, timeline in ipairs(animation.timelines) do
+      if timeline.vertices then
+        deformTimelines = deformTimelines + 1
+        for _, vertices in pairs(timeline.vertices) do
+          for _, value in ipairs(vertices) do
+            maxAbs = math.max(maxAbs, math.abs(value))
+          end
+        end
+      end
+    end
+  end
+
+  check(deformTimelines > 0, "found deform timelines in spineboy-pro")
+  check(maxAbs < 1, string.format(
+    "deform offsets are in skeleton units, not pixels (max abs %.3f)", maxAbs))
+end
+
+---------------------------------------------------------------------------
+section("drawOrder timelines reorder slots and reset with the setup pose")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/alien/alien.json",
+    "spine_playground/assets/alien/alien.atlas", 0.003)
+  local function orderString()
+    local names = {}
+    for i, slot in ipairs(inst.skeleton.drawOrder) do names[i] = slot.data.name end
+    return table.concat(names, ",")
+  end
+
+  local setupOrder = orderString()
+  inst.animationState:setAnimation(0, "death", false)
+  for _ = 1, 60 do spine.update(inst, 1 / 60) end -- t = 1.0: splat01 offset 7
+
+  check(orderString() ~= setupOrder, "drawOrder timeline changed the slot order")
+  local last = inst.skeleton.drawOrder[#inst.skeleton.drawOrder]
+  check(last and last.data.name == "splat01",
+    "splat01 moved to the end of the draw order (got " ..
+    tostring(last and last.data.name) .. ")")
+
+  inst.skeleton:setToSetupPose()
+  check(orderString() == setupOrder, "setToSetupPose restores setup draw order")
+end
+
+---------------------------------------------------------------------------
+section("events at time zero fire exactly once")
+
+do
+  local data = {
+    skeleton = { spine = "4.2.00", width = 10, height = 10 },
+    bones = { { name = "root" } },
+    slots = {},
+    skins = { default = {} },
+    events = { step = {} },
+    animations = {
+      a = {
+        events = {
+          { time = 0, name = "step" },
+          { time = 0.5, name = "step" },
+        },
+      },
+    },
+  }
+
+  local inst = spine.loadSkeleton(data)
+  local received = {}
+  inst.animationState:addListener({
+    event = function(_, event) table.insert(received, event.time) end,
+  })
+
+  inst.animationState:setAnimation(0, "a", false)
+  inst.animationState:update(0)
+  inst.animationState:apply(inst.skeleton)
+  check(#received == 1 and received[1] == 0, "event at t=0 fired on the first apply")
+
+  for _ = 1, 31 do
+    inst.animationState:update(1 / 60)
+    inst.animationState:apply(inst.skeleton)
+  end
+  check(#received == 2 and received[2] == 0.5,
+    "event at t=0.5 fired once (" .. table.concat(received, ",") .. ")")
+
+  -- Looping animations must not treat their first frame as a wrap-around.
+  local looping = spine.loadSkeleton(data)
+  local loopEvents = {}
+  looping.animationState:addListener({
+    event = function(_, event) table.insert(loopEvents, event.time) end,
+  })
+  looping.animationState:setAnimation(0, "a", true)
+  looping.animationState:update(0)
+  looping.animationState:apply(looping.skeleton)
+  check(#loopEvents == 1 and loopEvents[1] == 0,
+    "looping animation fires its t=0 event on the first apply")
+end
+
+---------------------------------------------------------------------------
+section("atlas: multi-page parsing, filters, and raw atlas text")
+
+do
+  local atlas = spine.TextureAtlas.new()
+  local text = [[spineboy.png
+size: 64, 64
+format: RGBA8888
+filter: Linear, Linear
+repeat: none
+
+regionA
+  rotate: false
+  xy: 0, 0
+  size: 32, 32
+  orig: 32, 32
+  offset: 0, 0
+  index: -1
+
+spineboy.png
+size: 64, 64
+format: RGBA8888
+filter: Nearest, Linear
+repeat: none
+regionB
+  rotate: false
+  xy: 0, 0
+  size: 32, 32
+  orig: 32, 32
+  offset: 0, 0
+  index: -1
+]]
+
+  local ok, err = atlas:loadAtlasFile(text,
+    assetPath("basic_usage/assets/spineboy"))
+  check(ok, "multi-page atlas parsed: " .. tostring(err))
+  check(#atlas.pages == 2, "multi-page atlas has 2 pages (got " .. #atlas.pages .. ")")
+  check(#atlas.regions == 2, "multi-page atlas has 2 regions (got " .. #atlas.regions .. ")")
+  check(atlas.regionsByName.regionA and atlas.regionsByName.regionA.page == atlas.pages[1],
+    "regionA belongs to page 1")
+  check(atlas.regionsByName.regionB and atlas.regionsByName.regionB.page == atlas.pages[2],
+    "regionB belongs to page 2")
+  check(atlas.pages[2].minFilter == "Nearest", "page 2 nearest filter parsed with spaces")
+  atlas:dispose()
+
+  local atlasPath = assetPath("basic_usage/assets/spineboy/spineboy.atlas")
+  local rawAtlas = lovr.filesystem.read(atlasPath)
+  check(rawAtlas ~= nil, "read raw atlas text")
+  local inst = spine.loadSkeleton(
+    assetPath("basic_usage/assets/spineboy/spineboy.json"), rawAtlas, 0.005)
+  check(inst.atlas ~= nil and #inst.atlas.pages == 1,
+    "raw atlas text loads an atlas")
+
+  local drawable = 0
+  for _, slot in ipairs(inst.skeleton.drawOrder) do
+    if slot.attachment and slot.attachment.region and slot.attachment.region.texture then
+      drawable = drawable + 1
+    end
+  end
+  check(drawable > 0, "raw atlas text binds attachment regions")
+  spine.release(inst)
+
+  check(spine.utils.joinPath("", "spineboy.png") == "spineboy.png",
+    "joinPath skips an empty image root")
+end
+
+---------------------------------------------------------------------------
+section("bounding boxes: vertices are parsed and transformed")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/spineboy-pro/spineboy-pro.json",
+    "spine_playground/assets/spineboy-pro/spineboy-pro.atlas", 0.004)
+  local skin = inst.skeletonData.skins.default
+  local slotIndex = inst.skeleton:findSlotIndex("head-bb")
+  local attachment = skin and skin:getAttachment(slotIndex, "head")
+  check(attachment ~= nil and attachment.type == "boundingbox",
+    "head-bb bounding box exists")
+  check(attachment ~= nil and #attachment.vertices == 12,
+    "bounding box vertices parsed (got " ..
+    tostring(attachment and #attachment.vertices) .. ")")
+
+  local slot = inst.skeleton:findSlot("head-bb")
+  if attachment and slot then
+    slot:setAttachment(attachment)
+    local worldVertices = {}
+    attachment:computeWorldVertices(slot, worldVertices)
+    check(#worldVertices == 12, "bounding box produces 12 world coordinates")
+
+    local bone = slot.bone
+    local vx, vy = attachment.vertices[1], attachment.vertices[2]
+    local expectedX = vx * bone.a + vy * bone.b + bone.worldX
+    local expectedY = vx * bone.c + vy * bone.d + bone.worldY
+    check(approx(worldVertices[1], expectedX) and approx(worldVertices[2], expectedY),
+      "bounding box is transformed by its slot bone")
+  end
+
+  spine.release(inst)
+end
+
+---------------------------------------------------------------------------
+section("skeleton scale and physics reference units")
+
+do
+  local inst = loadHighLevel("spine_playground/assets/sack/sack-pro.json",
+    "spine_playground/assets/sack/sack.atlas", 0.004)
+  check(approx(inst.skeletonData.referenceScale, 0.4),
+    "referenceScale defaults to 100 * skeleton scale (got " ..
+    tostring(inst.skeletonData.referenceScale) .. ")")
+  local physics = inst.skeletonData.physicsConstraints[1]
+  check(physics ~= nil and approx(physics._x, 1) and approx(physics._y, 1),
+    "physics channel strengths are not scaled by world units")
+  spine.release(inst)
+
+  local data = {
+    skeleton = { spine = "4.2.00", width = 10, height = 10 },
+    bones = { { name = "root", x = 10, y = 5 } },
+    slots = {},
+    skins = { default = {} },
+    animations = {},
+  }
+  local scaled = spine.loadSkeleton(data)
+  scaled.skeleton:setScale(2, 3)
+  scaled.skeleton:updateWorldTransform()
+  local root = scaled.skeleton.bones[1]
+  check(approx(root.worldX, 20) and approx(root.worldY, 15),
+    "skeleton scale moves root bones")
+  check(approx(root.a, 2) and approx(root.d, 3),
+    "skeleton scale multiplies root bone axes")
+  spine.release(scaled)
+end
+
+---------------------------------------------------------------------------
+section("asset cache: hits skip JSON parsing; table inputs are not address-keyed")
+
+do
+  spine.clearAssetCache()
+  local originalDecode = spine.utils.jsonDecode
+  local parses = 0
+  spine.utils.jsonDecode = function(text)
+    parses = parses + 1
+    return originalDecode(text)
+  end
+
+  local ok, err = pcall(function()
+    local a = loadHighLevel("basic_usage/assets/spineboy/spineboy.json",
+      "basic_usage/assets/spineboy/spineboy.atlas", 0.005)
+    local b = loadHighLevel("basic_usage/assets/spineboy/spineboy.json",
+      "basic_usage/assets/spineboy/spineboy.atlas", 0.005)
+    check(parses == 1, "second cached load does not parse JSON (parses=" .. parses .. ")")
+    check(a.skeletonData == b.skeletonData, "cached path loads share SkeletonData")
+    spine.release(a)
+    spine.release(b)
+  end)
+  spine.utils.jsonDecode = originalDecode
+  check(ok, "cache test completed: " .. tostring(err))
+
+  local function tableAsset(boneName)
+    return {
+      skeleton = { spine = "4.2.00", width = 10, height = 10 },
+      bones = { { name = boneName } },
+      slots = {},
+      skins = { default = {} },
+      animations = {},
+    }
+  end
+
+  local first = spine.loadSkeleton(tableAsset("boneA"))
+  local second = spine.loadSkeleton(tableAsset("boneB"))
+  check(first.skeletonData ~= second.skeletonData,
+    "distinct decoded tables are not merged by address")
+  check(first.skeletonData.bones[1].name == "boneA"
+    and second.skeletonData.bones[1].name == "boneB",
+    "decoded table inputs keep their own skeleton data")
+  spine.release(first)
+  spine.release(second)
+end
+
+---------------------------------------------------------------------------
+section("lifecycle: release defers texture disposal until the last instance")
+
+do
+  spine.clearAssetCache()
+  local a = loadHighLevel("basic_usage/assets/spineboy/spineboy.json",
+    "basic_usage/assets/spineboy/spineboy.atlas", 0.005)
+  local b = loadHighLevel("basic_usage/assets/spineboy/spineboy.json",
+    "basic_usage/assets/spineboy/spineboy.atlas", 0.005)
+  local texture = a.atlas.pages[1].texture
+
+  check(a.atlas == b.atlas, "lifecycle test instances share the atlas")
+  check(not texture.released, "shared texture starts alive")
+
+  spine.release(a)
+  check(not texture.released, "releasing one instance keeps shared texture alive")
+
+  local pass = stub.newPass()
+  spine.draw(b, pass, 0, 0, -2, 0.005, 0.005, 0.005, 0)
+  check(not texture.released, "remaining instance can still draw")
+
+  spine.release(b)
+  check(texture.released, "texture is released after the last instance")
+
+  local c = loadHighLevel("basic_usage/assets/spineboy/spineboy.json",
+    "basic_usage/assets/spineboy/spineboy.atlas", 0.005)
+  local texture2 = c.atlas.pages[1].texture
+  check(texture2 ~= texture, "released cache entry is reloaded on demand")
+
+  spine.clearAssetCache()
+  check(not texture2.released,
+    "clearAssetCache keeps textures used by live instances alive")
+
+  spine.release(c)
+  check(texture2.released, "live instance release disposes its detached entry")
+  check(spine.release(c) == false, "release is idempotent")
+  check(not pcall(spine.draw, c, stub.newPass(), 0, 0, -2, 1, 1, 1, 0),
+    "released instances cannot be drawn")
 end
 
 ---------------------------------------------------------------------------

@@ -573,9 +573,14 @@ function utils.getFileNameWithoutExtension(path)
 end
 
 function utils.joinPath(...)
-  local parts = {...}
+  local parts = {}
+  for i = 1, select("#", ...) do
+    local part = select(i, ...)
+    if part ~= nil and part ~= "" then
+      table.insert(parts, part)
+    end
+  end
   local result = table.concat(parts, "/")
-  -- 规范化路径
   result = result:gsub("/+", "/")
   result = result:gsub("/$", "")
   return result

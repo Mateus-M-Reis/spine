@@ -10,7 +10,8 @@ A complete Spine skeletal animation runtime for LÖVR, implementing the Spine an
 - **Asset Caching**: `loadSkeleton` shares `SkeletonData` and atlas textures across instances (see `spine.clearAssetCache`).
 - **Attachments**: Supports Region, Mesh, BoundingBox, and Path attachments.
 - **Sequences**: Spine 4.2 sequence attachments and sequence timelines (hold/once/loop/pingpong modes).
-- **Animation**: Timeline-based animations with crossfade mixing, multi-track layering (track alpha and mixBlend), and events (listener API).
+- **Animation**: Timeline-based animations with crossfade mixing, multi-track layering (track alpha and mixBlend), draw-order timelines, and events (listener API).
+- **Colors**: Skeleton, slot, and attachment tints are multiplied for every rendered attachment, including PMA and tint-black (dark color) shading.
 - **Constraints**: IK, Transform, Path, and Physics constraints.
 - **Skins**: Runtime skin switching.
 - **3D Positioning**: Place skeletons anywhere in 3D space with full transform control.
@@ -62,8 +63,15 @@ setup pose automatically.
 
 `SkeletonData` and atlas textures are cached and shared between instances, so
 spawning many copies of the same character reuses textures and parsed data
-(each call still gets its own `Skeleton`/renderer). Call
-`spine.clearAssetCache()` to release all cached resources.
+(each call still gets its own `Skeleton`/renderer). Cache keys use the JSON path
+plus the atlas path/text and scale; decoded table inputs and prebuilt `Atlas`
+objects are caller-owned and are not cached by address.
+
+Instances are reference-counted. Call `instance:release()` (or
+`spine.release(instance)`) when you are done with one; per-instance renderer
+resources are released immediately and shared textures are disposed when the
+last user is gone. `spine.clearAssetCache()` detaches all cache entries; entries
+still used by live instances stay alive until those instances are released.
 
 ### Animation events
 
@@ -178,10 +186,15 @@ luajit tests/run.lua          # runtime test suite
 luajit tests/run_examples.lua # loads/updates/draws both example projects
 ```
 
-The suite covers high-level loading (atlas binding, setup pose), asset caching,
-skeleton time advancement, batched rendering call counts and material caching,
-stencil clipping (including the no-stencil fallback), animation crossfades,
-track layering, event dispatch, Spine 4.2 sequences, and queued animations.
+The suite covers high-level loading (atlas binding, setup pose), asset caching
+(including parse-free cache hits and reference-counted release), multi-page and
+raw-text atlas loading, skeleton time advancement, batched rendering call
+counts, material caching, draw-order preservation across batch-state changes
+and clipping, skeleton/slot/attachment color multiplication, deform offset
+scaling, bounding-box parsing, skeleton scale, physics reference units, stencil
+clipping (including the no-stencil fallback), draw-order timelines, animation
+crossfades, track layering, event dispatch (including time-zero events), Spine
+4.2 sequences, and queued animations.
 
 ## Requirements
 

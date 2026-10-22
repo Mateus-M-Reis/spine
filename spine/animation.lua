@@ -21,7 +21,11 @@ function Animation:apply(skeleton, lastTime, time, loop, events, alpha, blend, d
 
     if loop and self.duration > 0 then
         time = time % self.duration
-        lastTime = lastTime % self.duration
+        -- A negative lastTime marks the first frame; keep it negative so
+        -- events at t=0 are not mistaken for a loop-boundary crossing.
+        if lastTime >= 0 then
+            lastTime = lastTime % self.duration
+        end
     end
 
     for _, timeline in ipairs(self.timelines) do
@@ -824,7 +828,8 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
             animation = animation,
             loop = loop,
             time = 0,
-            lastTime = 0,
+            -- -1 (rather than 0) lets EventTimeline fire events keyed at t=0.
+            lastTime = -1,
             isComplete = false,
             mixDuration = mixDuration,
             mixTime = 0,
@@ -837,7 +842,7 @@ function AnimationState:setAnimation(trackIndex, animationNameOrObject, loop)
         track.animation = animation
         track.loop = loop
         track.time = 0
-        track.lastTime = 0
+        track.lastTime = -1
         track.isComplete = false
         track.mixDuration = mixDuration
         track.mixTime = 0
@@ -1137,17 +1142,28 @@ function DrawOrderTimeline:setFrame(frameIndex, time, drawOrder)
     self.drawOrders[frameIndex + 1] = drawOrder
 end
 
+local function resetDrawOrder(skeleton)
+    local drawOrder, slots = skeleton.drawOrder, skeleton.slots
+    for i = 1, #slots do
+        drawOrder[i] = slots[i]
+    end
+end
+
 function DrawOrderTimeline:apply(skeleton, lastTime, time, events, alpha, blend, direction)
     local frames = self.frames
+    local drawOrder = skeleton.drawOrder
+    local slots = skeleton.slots
+
+    if direction == "out" then
+        if blend == "setup" then resetDrawOrder(skeleton) end
+        return
+    end
 
     if #frames == 0 then return end
 
     if time < frames[1] then
-        if blend == "setup" then
-            -- Reset draw order
-            for i, slot in ipairs(skeleton.slots) do
-                skeleton.drawOrder[i] = slot
-            end
+        if blend == "setup" or blend == "first" then
+            resetDrawOrder(skeleton)
         end
         return
     end
@@ -1160,40 +1176,13 @@ function DrawOrderTimeline:apply(skeleton, lastTime, time, events, alpha, blend,
     end
 
     local drawOrderToSetupIndex = self.drawOrders[frameIndex]
-    if not drawOrderToSetupIndex then return end
-
-    local drawOrder = skeleton.drawOrder
-    local slots = skeleton.slots
-
-    -- Reset draw order to setup order, then apply the frame's offsets
-    -- (each offset moves a slot by `amount` positions relative to setup).
-    local offsets = drawOrderToSetupIndex
-
-    for i, slot in ipairs(slots) do
-        drawOrder[i] = slot
+    if not drawOrderToSetupIndex or #drawOrderToSetupIndex == 0 then
+        resetDrawOrder(skeleton)
+        return
     end
 
-    -- Apply offsets
-    for _, offset in ipairs(offsets) do
-        local slotIndex = skeleton.data:findSlotIndex(offset.slot)
-        local amount = offset.offset
-
-        if slotIndex ~= -1 then
-            local slot = slots[slotIndex + 1] -- 1-based
-            -- Find slot in drawOrder
-            local oldIndex = 0
-            for i, s in ipairs(drawOrder) do
-                if s == slot then
-                    oldIndex = i
-                    break
-                end
-            end
-
-            if oldIndex > 0 then
-                table.remove(drawOrder, oldIndex)
-                table.insert(drawOrder, oldIndex + amount, slot)
-            end
-        end
+    for i = 1, #drawOrderToSetupIndex do
+        drawOrder[i] = slots[drawOrderToSetupIndex[i]]
     end
 end
 -- TwoColorTimeline

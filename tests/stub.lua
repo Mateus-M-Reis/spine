@@ -18,8 +18,11 @@ M.counts = {
   buffers = 0,
   meshes = 0,
   textures = 0,
-  verticesUploaded = 0,
+  verticesUploaded = 0, -- legacy alias for float count
+  vertexFloatsUploaded = 0,
 }
+
+M.VERTEX_COMPONENTS = 13
 
 M.timer.getTime = function()
   return os.clock()
@@ -72,13 +75,16 @@ M.graphics.newTexture = function(path)
   M.counts.textures = M.counts.textures + 1
   local texture = {
     path = path,
+    released = false,
     getDimensions = function() return 2048, 2048 end,
     getWidth = function() return 2048 end,
     getHeight = function() return 2048 end,
     setSampler = function() end,
     setFilter = function() end,
-    release = function() end,
   }
+  function texture:release()
+    self.released = true
+  end
   return texture
 end
 
@@ -93,10 +99,12 @@ M.graphics.newBuffer = function(format, vertexCount)
     vertexCount = vertexCount,
     data = nil,
   }
-  function buffer:setData(data, start)
+  function buffer:setData(data, start, source, count)
     self.data = data
     self.start = start
-    M.counts.verticesUploaded = M.counts.verticesUploaded + #data
+    local n = count or #data
+    M.counts.verticesUploaded = M.counts.verticesUploaded + n
+    M.counts.vertexFloatsUploaded = M.counts.vertexFloatsUploaded + n
   end
   function buffer:getVertexBuffer()
     return self
