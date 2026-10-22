@@ -204,7 +204,8 @@ concave-polygon triangulation and the no-stencil fallback), draw-order
 timelines, skin-required bones/constraints, transform-constraint world/local
 modes and shear, reference bone-matrix poses generated with Spine 4.2
 (including Bezier and stepped curves, looping playback, multi-track blending,
-IK, and transform-constraint mix timelines), animation crossfades, track
+IK, path, physics, and transform-constraint mix timelines), animation
+crossfades, track
 layering, event dispatch (including time-zero events), Spine 4.2 sequences, and
 queued animations.
 

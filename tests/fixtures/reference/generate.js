@@ -20,6 +20,15 @@ const loader = {
   newClippingAttachment: () => { throw new Error("fixture must not contain attachments"); },
 };
 
+const pathLoader = {
+  newRegionAttachment: () => { throw new Error("path fixture must not contain regions"); },
+  newMeshAttachment: () => { throw new Error("path fixture must not contain meshes"); },
+  newBoundingBoxAttachment: () => { throw new Error("path fixture must not contain bounding boxes"); },
+  newPathAttachment: (name) => new spine.PathAttachment(name),
+  newPointAttachment: () => { throw new Error("path fixture must not contain points"); },
+  newClippingAttachment: () => { throw new Error("path fixture must not contain clipping"); },
+};
+
 function readInput(name) {
   return JSON.parse(fs.readFileSync(path.join(here, name), "utf8"));
 }
@@ -143,8 +152,53 @@ function generateConstraintTimeline() {
   writeOutput("constraint_expected.json", output);
 }
 
+function generatePath() {
+  const input = readInput("path_input.json");
+  const skeletonData = new spine.SkeletonJson(pathLoader).readSkeletonData(input);
+  const skeleton = new spine.Skeleton(skeletonData);
+  skeleton.setToSetupPose();
+  skeleton.updateWorldTransform(spine.Physics.update);
+
+  const output = {};
+  for (const bone of skeleton.bones) {
+    output[bone.data.name] = [
+      bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
+    ];
+  }
+  writeOutput("path_expected.json", output);
+}
+
+function generatePhysics() {
+  const input = readInput("physics_input.json");
+  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+  const skeleton = new spine.Skeleton(skeletonData);
+  skeleton.setToSetupPose();
+  // Match the runtime's initialization pass before the first animation frame.
+  skeleton.updateWorldTransform(spine.Physics.update);
+
+  const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+  state.setAnimation(0, "move", true);
+  const dt = 1 / 30;
+  for (let i = 0; i < 30; i++) {
+    state.update(dt);
+    state.apply(skeleton);
+    skeleton.update(dt);
+    skeleton.updateWorldTransform(spine.Physics.update);
+  }
+
+  const output = {};
+  for (const bone of skeleton.bones) {
+    output[bone.data.name] = [
+      bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d,
+    ];
+  }
+  writeOutput("physics_expected.json", output);
+}
+
 generatePose();
 generateTimelines();
 generateIK();
 generateConstraintTimeline();
-console.log("wrote pose, timeline, IK, and transform-constraint reference fixtures");
+generatePath();
+generatePhysics();
+console.log("wrote pose, timeline, IK, path, physics, and transform-constraint fixtures");
