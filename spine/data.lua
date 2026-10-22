@@ -223,6 +223,18 @@ function RegionAttachment:updateRegion()
   -- end
 end
 
+-- Transforms one attachment-local point through scale, rotation, offset and
+-- bone. Kept at module scope so computing a region does not allocate a closure
+-- per attachment per frame.
+local function transformRegionPoint(lx, ly, scaleX, scaleY, cos, sin, x, y,
+                                     a, b, c, d, boneX, boneY)
+  lx = lx * scaleX
+  ly = ly * scaleY
+  local x1 = lx * cos - ly * sin + x
+  local y1 = lx * sin + ly * cos + y
+  return x1 * a + y1 * b + boneX, x1 * c + y1 * d + boneY
+end
+
 function RegionAttachment:computeWorldVertices(bone, worldVertices)
   local offset = self.offset
   local uvs = self.uvs
@@ -245,58 +257,30 @@ function RegionAttachment:computeWorldVertices(bone, worldVertices)
   local cos = math.cos(radians)
   local sin = math.sin(radians)
 
-  -- Helper to transform a local point
-  local function transformPoint(lx, ly)
-      -- Apply scale
-      lx = lx * scaleX
-      ly = ly * scaleY
-
-      -- Apply rotation and offset
-      local x1 = lx * cos - ly * sin + x
-      local y1 = lx * sin + ly * cos + y
-
-      -- Apply bone transform
-      local wx = x1 * a + y1 * b + boneX
-      local wy = x1 * c + y1 * d + boneY
-      return wx, wy
-  end
-
-  -- We need to output vertices in the order expected by the renderer (TL, BL, BR, TR for fan?)
-  -- Renderer uses:
-  -- 1: TL
-  -- 2: BL
-  -- 3: BR
-  -- 4: TR
-
-  -- self.offset contains:
-  -- 1: BL (indices 1,2)
-  -- 2: BR (indices 3,4)
-  -- 3: TR (indices 5,6)
-  -- 4: TL (indices 7,8)
-
-  -- TL (Offset 4)
-  local wx, wy = transformPoint(offset[7], offset[8])
+  -- Renderer expects TL, BL, BR, TR. self.offset stores BL, BR, TR, TL.
+  local wx, wy = transformRegionPoint(offset[7], offset[8], scaleX, scaleY, cos, sin,
+    x, y, a, b, c, d, boneX, boneY)
   worldVertices[1] = wx
   worldVertices[2] = wy
   worldVertices[3] = uvs[7]
   worldVertices[4] = uvs[8]
 
-  -- BL (Offset 1)
-  wx, wy = transformPoint(offset[1], offset[2])
+  wx, wy = transformRegionPoint(offset[1], offset[2], scaleX, scaleY, cos, sin,
+    x, y, a, b, c, d, boneX, boneY)
   worldVertices[5] = wx
   worldVertices[6] = wy
   worldVertices[7] = uvs[1]
   worldVertices[8] = uvs[2]
 
-  -- BR (Offset 2)
-  wx, wy = transformPoint(offset[3], offset[4])
+  wx, wy = transformRegionPoint(offset[3], offset[4], scaleX, scaleY, cos, sin,
+    x, y, a, b, c, d, boneX, boneY)
   worldVertices[9] = wx
   worldVertices[10] = wy
   worldVertices[11] = uvs[3]
   worldVertices[12] = uvs[4]
 
-  -- TR (Offset 3)
-  wx, wy = transformPoint(offset[5], offset[6])
+  wx, wy = transformRegionPoint(offset[5], offset[6], scaleX, scaleY, cos, sin,
+    x, y, a, b, c, d, boneX, boneY)
   worldVertices[13] = wx
   worldVertices[14] = wy
   worldVertices[15] = uvs[5]
@@ -612,7 +596,11 @@ function BoundingBoxAttachment.new(name)
   local self = setmetatable(Attachment.new(name), BoundingBoxAttachment)
   self.type = "boundingbox"
   self.color = math_module.Color.new(1, 1, 1, 1)
+  self.vertexCount = 0
+  self.worldVerticesLength = 0
   self.vertices = {}
+  self.bones = {}
+  self.weights = {}
   self.worldVertices = {}
   return self
 end
@@ -740,32 +728,33 @@ function ClippingAttachment:computeWorldVertices(slot, worldVertices)
 end
 
 function BoundingBoxAttachment:computeWorldVertices(slot, worldVertices)
-  local skeleton = slot.bone.skeleton
   local vertices = self.vertices
   local bones = self.bones
   local weights = self.weights
+  local vertexCount = self.vertexCount or (#vertices / 2)
 
   if #bones == 0 then
-    -- 无骨骼权重
-    for i = 1, #vertices do
-      worldVertices[i] = vertices[i]
+    local bone = slot.bone
+    local x, y = bone.worldX, bone.worldY
+    local a, b, c, d = bone.a, bone.b, bone.c, bone.d
+
+    for i = 1, vertexCount * 2, 2 do
+      local vx, vy = vertices[i], vertices[i + 1]
+      worldVertices[i] = vx * a + vy * b + x
+      worldVertices[i + 1] = vx * c + vy * d + y
     end
   else
-    -- 有骨骼权重
-    local w = 0
-    local v = 1
-    local b = 1
+    local skeleton = slot.bone.skeleton
+    local w, v, b = 0, 1, 1
 
-    for i = 1, #vertices, 2 do
-      local wx = 0
-      local wy = 0
+    for i = 1, vertexCount * 2, 2 do
+      local wx, wy = 0, 0
       local nn = bones[b] + b
       b = b + 1
 
       for n = b, nn do
         local bone = skeleton.bones[bones[n]]
-        local vx = vertices[v]
-        local vy = vertices[v + 1]
+        local vx, vy = vertices[v], vertices[v + 1]
         local weight = weights[w + 1]
 
         wx = wx + (vx * bone.a + vy * bone.b + bone.worldX) * weight
@@ -774,6 +763,7 @@ function BoundingBoxAttachment:computeWorldVertices(slot, worldVertices)
         v = v + 2
         w = w + 1
       end
+      b = nn + 1
 
       worldVertices[i] = wx
       worldVertices[i + 1] = wy
@@ -1001,6 +991,9 @@ function SkeletonData.new(jsonData, scale)
   self.imagesPath = nil
   self.audioPath = nil
   self.fps = 30
+  -- Scale at which the skeleton was authored. Physics uses this to convert
+  -- world-space forces to the skeleton's reference units.
+  self.referenceScale = 100 * self.scale
 
   if jsonData then
     self:loadFromJson(jsonData, nil)
@@ -1020,6 +1013,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
     self.imagesPath = skeleton.images
     self.audioPath = skeleton.audio
     self.fps = skeleton.fps or 30
+    self.referenceScale = (skeleton.referenceScale or 100) * self.scale
   end
 
   -- 解析骨骼数据
@@ -1250,8 +1244,10 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
       physicsData.order = physicsJson.order or 0
       physicsData.bone = self:findBone(physicsJson.bone)
       
-      physicsData._x = (physicsJson.x or 0) * self.scale
-      physicsData._y = (physicsJson.y or 0) * self.scale
+      -- Channel strengths are multipliers, not lengths; only the limit is
+      -- expressed in skeleton units (matching the Spine 4.2 reference).
+      physicsData._x = physicsJson.x or 0
+      physicsData._y = physicsJson.y or 0
       physicsData._rotate = physicsJson.rotate or 0
       physicsData._scaleX = physicsJson.scaleX or 0
       physicsData._shearX = physicsJson.shearX or 0
@@ -2039,6 +2035,80 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
         table.insert(timelines, timeline)
       end
 
+      -- Parse draw order timelines. Spine stores offsets relative to the
+      -- setup order; resolve them into a full slot-index mapping up front so
+      -- playback is a cheap array lookup.
+      if animJson.drawOrder then
+        local framesData = animJson.drawOrder
+        if #framesData > 0 then
+          local timeline = animationModule.DrawOrderTimeline.new(#framesData)
+          local slotCount = #self.slots
+
+          for i, frame in ipairs(framesData) do
+            local time = frame.time or 0
+            local drawOrder = nil
+
+            if frame.offsets then
+              local order = {}
+              for si = 1, slotCount do order[si] = -1 end
+
+              local unchanged = {}
+              local originalIndex = 1
+              for _, offsetMap in ipairs(frame.offsets) do
+                local slotIndex = self:findSlotIndex(offsetMap.slot)
+                if slotIndex == -1 then
+                  error(string.format(
+                    "Draw order slot not found in animation '%s': %s",
+                    animName, tostring(offsetMap.slot)))
+                end
+                if slotIndex < originalIndex then
+                  error(string.format(
+                    "Draw order offsets must be in slot order in animation '%s' (slot '%s')",
+                    animName, tostring(offsetMap.slot)))
+                end
+
+                while originalIndex < slotIndex do
+                  table.insert(unchanged, originalIndex)
+                  originalIndex = originalIndex + 1
+                end
+
+                local destination = originalIndex + (offsetMap.offset or 0)
+                if destination < 1 or destination > slotCount then
+                  error(string.format(
+                    "Draw order offset out of range in animation '%s': slot '%s' offset %d",
+                    animName, tostring(offsetMap.slot), offsetMap.offset or 0))
+                end
+
+                order[destination] = originalIndex
+                originalIndex = originalIndex + 1
+              end
+
+              while originalIndex <= slotCount do
+                table.insert(unchanged, originalIndex)
+                originalIndex = originalIndex + 1
+              end
+
+              for si = slotCount, 1, -1 do
+                if order[si] == -1 then
+                  local unchangedSlot = table.remove(unchanged)
+                  if unchangedSlot == nil then
+                    error(string.format(
+                      "Invalid draw order in animation '%s': unresolved slot", animName))
+                  end
+                  order[si] = unchangedSlot
+                end
+              end
+              drawOrder = order
+            end
+
+            timeline:setFrame(i - 1, time, drawOrder)
+            if time > duration then duration = time end
+          end
+
+          table.insert(timelines, timeline)
+        end
+      end
+
       -- Parse slot timelines (attachment switching, color, etc.)
       if animJson.slots then
         for slotName, slotTimelines in pairs(animJson.slots) do
@@ -2158,6 +2228,13 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                       local time = frame.time or 0
                       local offset = frame.offset or 0
                       local vertices = frame.vertices or {}
+                      if self.scale ~= 1 and #vertices > 0 then
+                        local scaled = {}
+                        for vi = 1, #vertices do
+                          scaled[vi] = vertices[vi] * self.scale
+                        end
+                        vertices = scaled
+                      end
                       timeline:setFrame(i - 1, time, vertices, offset)
 
                       if frame.curve then
@@ -2528,7 +2605,47 @@ function SkeletonData:createAttachment(attachmentMap, attachmentName, attachment
       attachment.color:fromHex(attachmentMap.color)
     end
 
-    -- 这里应该解析顶点数据
+    if attachmentMap.vertices then
+      local jsonVertices = attachmentMap.vertices
+      local vertexCount = attachmentMap.vertexCount or (#jsonVertices / 2)
+      attachment.vertexCount = vertexCount
+      attachment.worldVerticesLength = vertexCount * 2
+
+      if #jsonVertices <= vertexCount * 2 then
+        attachment.vertices = {}
+        for i, v in ipairs(jsonVertices) do
+          attachment.vertices[i] = v * self.scale
+        end
+      else
+        attachment.vertices = {}
+        attachment.bones = {}
+        attachment.weights = {}
+
+        local v, b, w, i = 1, 1, 1, 1
+        while i <= #jsonVertices do
+          local boneCount = jsonVertices[i]
+          attachment.bones[b] = boneCount
+          b = b + 1
+          i = i + 1
+
+          for _ = 1, boneCount do
+            attachment.bones[b] = jsonVertices[i] + 1
+            b = b + 1
+            i = i + 1
+
+            attachment.vertices[v] = jsonVertices[i] * self.scale
+            attachment.vertices[v + 1] = jsonVertices[i + 1] * self.scale
+            v = v + 2
+            i = i + 2
+
+            attachment.weights[w] = jsonVertices[i]
+            w = w + 1
+            i = i + 1
+          end
+        end
+      end
+    end
+
     return attachment
   elseif attachmentType == "linkedmesh" then
     local path = attachmentMap.path or attachmentMap.name or attachmentName

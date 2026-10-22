@@ -153,7 +153,14 @@ function Bone:updateWorldTransform()
         -- Root bone
         local skeletonFlipX = self.skeleton.flipX
         local skeletonFlipY = self.skeleton.flipY
-        
+        local skeletonScaleX = self.skeleton.scaleX or 1
+        local skeletonScaleY = self.skeleton.scaleY or 1
+
+        lx = lx * skeletonScaleX
+        ly = ly * skeletonScaleY
+        la, lb = la * skeletonScaleX, lb * skeletonScaleX
+        lc, ld = lc * skeletonScaleY, ld * skeletonScaleY
+
         if skeletonFlipX then
             lx = -lx
             la = -la
@@ -255,6 +262,8 @@ function Skeleton.new(skeletonData)
     self.skin = nil
     self.x = 0
     self.y = 0
+    self.scaleX = 1
+    self.scaleY = 1
     self.r = 1
     self.g = 1
     self.b = 1
@@ -376,8 +385,9 @@ function Skeleton:setBonesToSetupPose()
 end
 
 function Skeleton:setSlotsToSetupPose()
-    for _, slot in ipairs(self.slots) do
+    for i, slot in ipairs(self.slots) do
         slot:setToSetupPose()
+        self.drawOrder[i] = slot
     end
     
     -- Apply skin attachments (including default skin fallback)
@@ -401,6 +411,20 @@ end
 
 function Skeleton:getRootBone()
     return self.bones[1]
+end
+
+-- Sets the skeleton-wide tint applied to every slot/attachment.
+function Skeleton:setColor(r, g, b, a)
+    self.r = r or 1
+    self.g = g or 1
+    self.b = b or 1
+    self.a = a or 1
+end
+
+-- Sets the skeleton-wide scale applied to root bones.
+function Skeleton:setScale(scaleX, scaleY)
+    self.scaleX = scaleX or 1
+    self.scaleY = scaleY or self.scaleX
 end
 
 function Skeleton:findBone(boneName)

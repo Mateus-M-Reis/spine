@@ -1138,8 +1138,9 @@ function PhysicsConstraint:update(physics)
             
             local qx = data._limit * delta * sx
             local qy = qx * sy
-            
-            local gApplied = -self.gravity * f
+
+            -- Gravity is scaled by the skeleton's Y scale; wind by X.
+            local gApplied = -self.gravity * f * sy
             
             if x or y then
                 if x then
@@ -1159,7 +1160,7 @@ function PhysicsConstraint:update(physics)
                     local d = math.pow(self.damping, 60 * t)
                     local m = self.massInverse * t
                     local e = self.strength
-                    local w = self.wind * f * (self.skeleton.scaleX or 1)
+                    local w = self.wind * f * sx
                     
                     while a >= t do
                         if x then

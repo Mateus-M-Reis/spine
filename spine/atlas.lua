@@ -30,6 +30,7 @@ end
 
 function AtlasRegion:setTexture(texture)
 	self.texture = texture
+	self._textureKey = texture and tostring(texture) or nil
 	if texture then
 		local texWidth, texHeight = texture:getDimensions()
 		self.u = self.x / texWidth
@@ -68,53 +69,66 @@ function Atlas.new()
 end
 
 function Atlas:loadAtlasFile(atlasText, imagePath)
+	if type(atlasText) ~= "string" then
+		return nil, "Atlas data must be a string"
+	end
+
+	-- Reloading an Atlas should not leak the previous pages' textures.
+	if #self.pages > 0 then
+		self:dispose()
+	end
+
 	local lines = {}
-	for line in atlasText:gmatch("[^\r\n]+") do
+	local normalized = atlasText:gsub("\r\n", "\n"):gsub("\r", "\n")
+	for line in (normalized .. "\n"):gmatch("(.-)\n") do
 		table.insert(lines, line)
 	end
-	local lineIndex = 1
+
 	local currentPage = nil
 	local currentRegion = nil
+	local expectPage = true
+	local pageRegionStart = 0
 
-	while lineIndex <= #lines do
-		local line = lines[lineIndex]
-		lineIndex = lineIndex + 1
+	local function startPage(name)
+		currentPage = AtlasPage.new(name)
+		currentRegion = nil
+		expectPage = false
+		pageRegionStart = #self.regions
+		table.insert(self.pages, currentPage)
+	end
 
-		if line == "" then
-			-- Empty line - skip
-		elseif not currentPage then
-			-- Start of a new page
-			currentPage = AtlasPage.new(line)
-			table.insert(self.pages, currentPage)
-		elseif not currentRegion then
-			-- Check if this is a page property (key: value format)
-			local key, value = line:match("^%s*(%w+):%s*(.+)$")
-			if key and value then
-				self:parsePageProperty(currentPage, key, value)
-			else
-				-- This is a region name - start new region
-				currentRegion = AtlasRegion.new()
-				currentRegion.name = line
-				currentRegion.page = currentPage
-				table.insert(self.regions, currentRegion)
-				self.regionsByName[line] = currentRegion
-			end
+	local function startRegion(name)
+		currentRegion = AtlasRegion.new()
+		currentRegion.name = name
+		currentRegion.page = currentPage
+		table.insert(self.regions, currentRegion)
+		self.regionsByName[name] = currentRegion
+	end
+
+	for _, line in ipairs(lines) do
+		if line:match("^%s*$") then
+			-- A blank line after regions ends the current page. A blank line
+			-- between a page header and its first region does not. The next
+			-- non-property line after the former is a new page name, so
+			-- multi-page atlases do not turn page headers into regions.
+			currentRegion = nil
+			expectPage = currentPage ~= nil and #self.regions > pageRegionStart
 		else
-			local key, value = line:match("^%s*(%w+):%s*(.+)$")
-			if key and value then
-				self:parseRegionProperty(currentRegion, key, value)
-			else
-				-- Check if this is a new region name (non-indented, non-empty)
-				-- If the line doesn't start with whitespace and isn't empty, it's a new region
-				if not line:match("^%s") and line ~= "" then
-					-- This is a new region name - create it
-					currentRegion = AtlasRegion.new()
-					currentRegion.name = line
-					currentRegion.page = currentPage
-					table.insert(self.regions, currentRegion)
-					self.regionsByName[line] = currentRegion
+			local key, value = line:match("^%s*([%w_]+):%s*(.-)%s*$")
+			if key then
+				if currentRegion then
+					self:parseRegionProperty(currentRegion, key, value)
+				elseif currentPage then
+					self:parsePageProperty(currentPage, key, value)
 				else
-					currentRegion = nil
+					return nil, "Atlas property before page header: " .. line
+				end
+			else
+				local name = line:gsub("^%s+", ""):gsub("%s+$", "")
+				if expectPage or not currentPage then
+					startPage(name)
+				else
+					startRegion(name)
 				end
 			end
 		end
@@ -149,6 +163,7 @@ function Atlas:loadAtlasFile(atlasText, imagePath)
 	for _, page in ipairs(self.pages) do
 		local ok, err = self:loadPageTexture(page, imagePath)
 		if not ok then
+			self:dispose()
 			return nil, err
 		end
 	end
@@ -166,22 +181,26 @@ function Atlas:parsePageProperty(page, key, value)
 	elseif key == "format" then
 		-- RGBA8888, RGBA4444, etc. (not used in Love2D)
 	elseif key == "filter" then
-		local min, mag = value:match("(%w+),(%w+)")
+		local min, mag = value:match("^%s*(%w+)%s*,%s*(%w+)%s*$")
 		if min and mag then
 			page.minFilter = min
 			page.magFilter = mag
 		end
 	elseif key == "repeat" then
-		if value == "x" then
+		local wrap = value:match("^%s*(%w+)%s*$")
+		if wrap == "x" then
 			page.uWrap = "repeat"
-		elseif value == "y" then
+		elseif wrap == "y" then
 			page.vWrap = "repeat"
-		elseif value == "xy" then
+		elseif wrap == "xy" then
 			page.uWrap = "repeat"
 			page.vWrap = "repeat"
 		end
 	elseif key == "pma" then
-		page.pma = (value == "true")
+		local pma = value:match("^%s*(%w+)%s*$")
+		page.pma = (pma == "true")
+	elseif key == "scale" then
+		page.scale = tonumber(value)
 	end
 end
 
@@ -189,19 +208,20 @@ function Atlas:parseRegionProperty(region, key, value)
 	if key == "rotate" then
 		region.rotate = value == "true" or value == "90"
 	elseif key == "xy" then
-		local x, y = value:match("(%d+)%s*,%s*(%d+)")
+		local x, y = value:match("^%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if x and y then
 			region.x = tonumber(x)
 			region.y = tonumber(y)
 		end
 	elseif key == "size" then
-		local width, height = value:match("(%d+)%s*,%s*(%d+)")
+		local width, height = value:match("^%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if width and height then
 			region.width = tonumber(width)
 			region.height = tonumber(height)
 		end
 	elseif key == "bounds" then
-		local x, y, width, height = value:match("(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+		local x, y, width, height = value:match(
+			"^%s*([+-]?%d+)%s*,%s*([+-]?%d+)%s*,%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if x and y and width and height then
 			region.x = tonumber(x)
 			region.y = tonumber(y)
@@ -209,19 +229,20 @@ function Atlas:parseRegionProperty(region, key, value)
 			region.height = tonumber(height)
 		end
 	elseif key == "orig" then
-		local width, height = value:match("(%d+)%s*,%s*(%d+)")
+		local width, height = value:match("^%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if width and height then
 			region.originalWidth = tonumber(width)
 			region.originalHeight = tonumber(height)
 		end
 	elseif key == "offset" then
-		local x, y = value:match("(%d+)%s*,%s*(%d+)")
+		local x, y = value:match("^%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if x and y then
 			region.offsetX = tonumber(x)
 			region.offsetY = tonumber(y)
 		end
 	elseif key == "offsets" then
-		local x, y, width, height = value:match("(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
+		local x, y, width, height = value:match(
+			"^%s*([+-]?%d+)%s*,%s*([+-]?%d+)%s*,%s*([+-]?%d+)%s*,%s*([+-]?%d+)")
 		if x and y and width and height then
 			region.offsetX = tonumber(x)
 			region.offsetY = tonumber(y)

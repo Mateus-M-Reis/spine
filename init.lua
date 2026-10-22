@@ -79,21 +79,88 @@ end
 local assetCache = {}
 
 local function assetCacheKey(jsonFile, atlasFile, scale)
-  local jsonKey = type(jsonFile) == "string" and jsonFile or tostring(jsonFile)
-  local atlasKey = type(atlasFile) == "string" and atlasFile
-    or (type(atlasFile) == "table" and tostring(atlasFile))
-    or tostring(atlasFile)
-  return jsonKey .. "|" .. atlasKey .. "|" .. tostring(scale)
+  -- Only cache by stable, caller-independent inputs. Table references are
+  -- deliberately not used: their tostring() is an address that Lua can reuse
+  -- after GC, which would return the wrong SkeletonData for a different asset.
+  if type(jsonFile) ~= "string" then
+    return nil
+  end
+  if atlasFile ~= nil and type(atlasFile) ~= "string" then
+    return nil
+  end
+  return jsonFile .. "|" .. (atlasFile or "") .. "|" .. tostring(scale)
 end
 
--- Releases all cached skeleton data and atlas textures.
+local function disposeAssetEntry(entry)
+  if entry.ownsAtlas and not entry.atlasDisposed and entry.atlas and entry.atlas.dispose then
+    pcall(entry.atlas.dispose, entry.atlas)
+    entry.atlasDisposed = true
+  end
+end
+
+-- Releases unused cached skeleton data and atlas textures. Entries still
+-- referenced by live instances are detached from the cache and disposed when
+-- the last instance using them is released.
 function spine.clearAssetCache()
-  for _, entry in pairs(assetCache) do
-    if entry.atlas and entry.atlas.dispose then
-      pcall(entry.atlas.dispose, entry.atlas)
+  local oldCache = assetCache
+  assetCache = {}
+  for _, entry in pairs(oldCache) do
+    entry.cacheKey = nil
+    entry.detached = true
+    if (entry.refs or 0) <= 0 then
+      disposeAssetEntry(entry)
     end
   end
-  assetCache = {}
+end
+
+-- Releases an instance and its per-instance renderer resources. Shared
+-- SkeletonData/atlas textures are disposed when the last instance is released.
+function spine.release(instance)
+  if type(instance) ~= "table" or instance._released then
+    return false
+  end
+  instance._released = true
+
+  if instance.renderer and instance.renderer.release then
+    instance.renderer:release()
+  end
+
+  local entry = instance._assetEntry
+  if entry then
+    entry.refs = math.max(0, (entry.refs or 1) - 1)
+    if entry.refs == 0 then
+      disposeAssetEntry(entry)
+      if entry.cacheKey and assetCache[entry.cacheKey] == entry then
+        assetCache[entry.cacheKey] = nil
+      end
+      entry.atlas = nil
+      entry.skeletonData = nil
+    end
+    instance._assetEntry = nil
+  end
+
+  return true
+end
+
+-- Convenience instance methods; calling these keeps update/draw/release
+-- together without changing the existing free-function API.
+local Instance = {}
+Instance.__index = Instance
+
+function Instance:update(deltaTime)
+  return spine.update(self, deltaTime)
+end
+
+function Instance:draw(pass, ...)
+  return spine.draw(self, pass, ...)
+end
+
+function Instance:drawDebug(pass, ...)
+  return spine.drawDebug(self, pass, ...)
+end
+
+function Instance:release()
+  return spine.release(self)
 end
 
 -- Load Spine data files.
@@ -104,33 +171,43 @@ end
 function spine.loadSkeleton(jsonFile, atlasFile, scale)
   scale = scale or 1
 
-  local jsonData
-  if type(jsonFile) == "string" then
-    local fileData = lovr.filesystem.read(jsonFile)
-    if not fileData then
-      error(string.format("Failed to read JSON file: %s", jsonFile))
-    end
-    jsonData = spine.utils.jsonDecode(fileData)
-  else
-    jsonData = jsonFile
-  end
-
-  if not jsonData then
-    error("Invalid JSON data")
-  end
-
-  -- Reuse cached skeleton data and atlas when available.
+  -- Check the cache before reading/parsing JSON. A cache hit should not pay
+  -- the (often tens of milliseconds) JSON parse cost again.
   local cacheKey = assetCacheKey(jsonFile, atlasFile, scale)
-  local cached = assetCache[cacheKey]
+  local cached = cacheKey and assetCache[cacheKey]
 
   local atlas
   local attachmentLoader
   local skeletonData
+  local entry
+  local atlasOwned = false
 
   if cached then
     atlas = cached.atlas
     skeletonData = cached.skeletonData
+    entry = cached
+    entry.refs = (entry.refs or 1) + 1
   else
+    local jsonData
+    if type(jsonFile) == "string" then
+      local fileData = lovr.filesystem.read(jsonFile)
+      if not fileData then
+        error(string.format("Failed to read JSON file: %s", jsonFile))
+      end
+      local decodeError
+      jsonData, decodeError = spine.utils.jsonDecode(fileData)
+      if not jsonData then
+        error(string.format("Failed to parse JSON file: %s (%s)",
+          jsonFile, decodeError or "unknown error"))
+      end
+    else
+      jsonData = jsonFile
+    end
+
+    if not jsonData then
+      error("Invalid JSON data")
+    end
+
     -- Load the atlas (if any) and build an attachment loader so attachments
     -- get their textures/regions. Without this the skeleton would have no
     -- renderable regions.
@@ -138,19 +215,30 @@ function spine.loadSkeleton(jsonFile, atlasFile, scale)
       local atlasData
       local imageRoot
       if type(atlasFile) == "string" then
-        atlasData = lovr.filesystem.read(atlasFile)
-        if not atlasData then
-          error(string.format("Failed to read atlas file: %s", atlasFile))
+        if atlasFile:find("\n", 1, true) then
+          -- Raw atlas text. Resolve page textures relative to the JSON file
+          -- (or the source root when the JSON was passed as a table).
+          atlasData = atlasFile
+          imageRoot = type(jsonFile) == "string"
+            and (jsonFile:match("^(.*)/[^/]+$") or "") or ""
+        else
+          atlasData = lovr.filesystem.read(atlasFile)
+          if not atlasData then
+            error(string.format("Failed to read atlas file: %s", atlasFile))
+          end
+          imageRoot = atlasFile:match("^(.*)/[^/]+$") or ""
         end
-        imageRoot = atlasFile:match("^(.*)/[^/]+$") or ""
       elseif type(atlasFile) == "table" and atlasFile.loadAtlasFile then
         atlas = atlasFile -- already-built Atlas object
       else
         atlasData = atlasFile -- raw atlas text
+        imageRoot = type(jsonFile) == "string"
+          and (jsonFile:match("^(.*)/[^/]+$") or "") or ""
       end
 
       if atlasData then
         atlas = spine.TextureAtlas.new()
+        atlasOwned = true
         local ok, err = atlas:loadAtlasFile(atlasData, imageRoot)
         if not ok then
           error(string.format("Failed to load atlas: %s", err or "unknown error"))
@@ -165,7 +253,16 @@ function spine.loadSkeleton(jsonFile, atlasFile, scale)
     skeletonData = spine.data.SkeletonData.new(nil, scale)
     skeletonData:loadFromJson(jsonData, attachmentLoader)
 
-    assetCache[cacheKey] = { atlas = atlas, skeletonData = skeletonData }
+    entry = {
+      atlas = atlas,
+      skeletonData = skeletonData,
+      refs = 1,
+      ownsAtlas = atlasOwned,
+      cacheKey = cacheKey,
+    }
+    if cacheKey then
+      assetCache[cacheKey] = entry
+    end
   end
 
   local skeleton = spine.skeleton.Skeleton.new(skeletonData)
@@ -179,24 +276,28 @@ function spine.loadSkeleton(jsonFile, atlasFile, scale)
   local renderer = spine.Renderer.new()
 
   local animationState, animationStateData = nil, nil
-  if jsonData.animations and next(jsonData.animations) then
+  if skeletonData.animations and next(skeletonData.animations) then
     animationStateData = spine.data.AnimationStateData.new(skeletonData)
     animationState = spine.animation.AnimationState.new(animationStateData)
   end
 
-  return {
+  return setmetatable({
     skeleton = skeleton,
     animationState = animationState,
     animationStateData = animationStateData,
     renderer = renderer,
     skeletonData = skeletonData,
     atlas = atlas,
-    attachmentLoader = attachmentLoader
-  }
+    attachmentLoader = attachmentLoader,
+    _assetEntry = entry,
+  }, Instance)
 end
 
 -- Update animation state (framework-agnostic)
 function spine.update(instance, deltaTime)
+  if instance._released then
+    error("Cannot update a released Spine instance", 2)
+  end
   local startTime = lovr.timer.getTime()
 
   if instance.animationState then
@@ -221,6 +322,9 @@ local buildTransform = spine.buildTransform
 -- Usage: spine.draw(instance, pass, x, y, z, scaleX, scaleY, scaleZ, rotation)
 --   or: spine.draw(instance, pass, mat4_transform)
 function spine.draw(instance, pass, ...)
+  if instance._released then
+    error("Cannot draw a released Spine instance", 2)
+  end
   local startTime = lovr.timer.getTime()
 
   spine.performance.drawCalls = 0
@@ -242,6 +346,9 @@ end
 
 -- Debug rendering
 function spine.drawDebug(instance, pass, ...)
+  if instance._released then
+    error("Cannot draw a released Spine instance", 2)
+  end
   local transform = buildTransform(...)
 
   pass:push()
