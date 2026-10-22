@@ -3,7 +3,7 @@
 
 local mathModule = require("spine.math")
 local utilsModule = require("spine.utils")
-local unpackValues = table.unpack or unpack
+local unpackValues = rawget(table, "unpack") or unpack
 
 local VERTEX_FORMAT = {
 	{ "VertexPosition", "vec3" },

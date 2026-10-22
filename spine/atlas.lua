@@ -180,8 +180,6 @@ function Atlas:parsePageProperty(page, key, value)
 			page.width = tonumber(width)
 			page.height = tonumber(height)
 		end
-	elseif key == "format" then
-		-- RGBA8888, RGBA4444, etc. (not used in Love2D)
 	elseif key == "filter" then
 		local min, mag = value:match("^%s*(%w+)%s*,%s*(%w+)%s*$")
 		if min and mag then

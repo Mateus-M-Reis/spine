@@ -10,7 +10,7 @@ function Bone.new(boneData, parent, skeleton)
     self.parent = parent
     self.children = {}
     self.active = not boneData.skinRequired
-    
+
     self.x = boneData.x
     self.y = boneData.y
     self.rotation = boneData.rotation
@@ -29,7 +29,7 @@ function Bone.new(boneData, parent, skeleton)
     self.ascaleY = self.scaleY
     self.ashearX = self.shearX
     self.ashearY = self.shearY
-    
+
     self.worldX = 0
     self.worldY = 0
     self.worldRotation = 0
@@ -41,11 +41,11 @@ function Bone.new(boneData, parent, skeleton)
     self.b = 0
     self.c = 0
     self.d = 1
-    
+
     if parent then
         table.insert(parent.children, self)
     end
-    
+
     return self
 end
 
@@ -140,31 +140,31 @@ function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shear
     self.ashearX, self.ashearY = self.shearX, self.shearY
 
     local parent = self.parent
-    
+
     -- 1. Compute Local Matrix (la, lb, lc, ld)
     -- Uses Spine's shear formula:
     -- la = cos(rot + shearX) * sx
     -- lc = sin(rot + shearX) * sx
     -- lb = cos(rot + 90 + shearY) * sy
     -- ld = sin(rot + 90 + shearY) * sy
-    
+
     local rotation = self.rotation
     local shearX = self.shearX or 0
     local shearY = self.shearY or 0
     local scaleX = self.scaleX
     local scaleY = self.scaleY
-    
+
     local rotX = math.rad(rotation + shearX)
     local rotY = math.rad(rotation + 90 + shearY)
-    
+
     local la = math.cos(rotX) * scaleX
     local lc = math.sin(rotX) * scaleX
     local lb = math.cos(rotY) * scaleY
     local ld = math.sin(rotY) * scaleY
-    
+
     local lx = self.x
     local ly = self.y
-    
+
     if parent then
         local pa = parent.a
         local pb = parent.b
@@ -172,41 +172,41 @@ function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shear
         local pd = parent.d
         local px = parent.worldX
         local py = parent.worldY
-        
+
         -- Matrix used for rotation/scale inheritance (default to parent matrix)
         local ma = pa
         local mb = pb
         local mc = pc
         local md = pd
-        
+
         local transformMode = self.data.transformMode
-        
+
         if transformMode == "normal" then
             self.worldRotation = parent.worldRotation + self.rotation
-            
+
         elseif transformMode == "onlyTranslation" then
             self.worldRotation = self.rotation
             -- Inherit only translation: reset rotation/scale part to identity
             ma = 1; mb = 0
             mc = 0; md = 1
-            
+
         elseif transformMode == "noRotationOrReflection" then
             self.worldRotation = self.rotation
             local sX = math.sqrt(pa * pa + pc * pc)
             local sY = math.sqrt(pb * pb + pd * pd)
-            
+
             -- Construct scale-only matrix (ignores rotation and reflection)
             ma = sX
             mb = 0
             mc = 0
             md = sY
-            
+
         elseif transformMode == "noScale" or transformMode == "noScaleOrReflection" then
             self.worldRotation = parent.worldRotation + self.rotation
-            
+
             local sX = math.sqrt(ma * ma + mc * mc)
             local sY = math.sqrt(mb * mb + md * md)
-            
+
             if sX > 0.00001 then
                 local invX = 1 / sX
                 ma = ma * invX
@@ -217,7 +217,7 @@ function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shear
                 mb = mb * invY
                 md = md * invY
             end
-            
+
             if transformMode == "noScaleOrReflection" then
                 local det = ma * md - mb * mc
                 if det < 0 then
@@ -226,21 +226,21 @@ function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shear
                 end
             end
         end
-        
+
         -- Calculate World Position (Always affected by parent transform)
         self.worldX = pa * lx + pb * ly + px
         self.worldY = pc * lx + pd * ly + py
-        
+
         -- Calculate World Matrix (Affected by transform mode)
         self.a = ma * la + mb * lc
         self.b = ma * lb + mb * ld
         self.c = mc * la + md * lc
         self.d = mc * lb + md * ld
-        
+
         -- Handle Flip (applied after inheritance)
         self.worldFlipX = parent.worldFlipX ~= (self.flipX or false)
         self.worldFlipY = parent.worldFlipY ~= (self.flipY or false)
-        
+
     else
         -- Root bone
         local skeletonFlipX = self.skeleton.flipX
@@ -263,18 +263,18 @@ function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shear
             lc = -lc
             ld = -ld
         end
-        
+
         self.worldX = lx + self.skeleton.x
         self.worldY = ly + self.skeleton.y
         self.a = la
         self.b = lb
         self.c = lc
         self.d = ld
-        
+
         self.worldFlipX = skeletonFlipX ~= (self.flipX or false)
         self.worldFlipY = skeletonFlipY ~= (self.flipY or false)
     end
-    
+
     -- Update children
     for _, child in ipairs(self.children) do
         child:updateWorldTransform()
@@ -290,7 +290,7 @@ function Bone:setToSetupPose()
     self.scaleY = data.scaleY
     self.shearX = data.shearX
     self.shearY = data.shearY
-    
+
     -- if self.skeleton.time < 0.2 then -- Only print for first few frames
     --     print("Bone Reset: " .. self.data.name)
     -- end
@@ -305,9 +305,9 @@ function Slot.new(slotData, bone)
     self.bone = bone
     self.color = {r = slotData.color.r, g = slotData.color.g, b = slotData.color.b, a = slotData.color.a}
     self.darkColor = slotData.darkColor and {
-        r = slotData.darkColor.r, 
-        g = slotData.darkColor.g, 
-        b = slotData.darkColor.b, 
+        r = slotData.darkColor.r,
+        g = slotData.darkColor.g,
+        b = slotData.darkColor.b,
         a = slotData.darkColor.a
     } or nil
     self.attachment = nil
@@ -341,7 +341,7 @@ Skeleton.__index = Skeleton
 
 function Skeleton.new(skeletonData)
     local self = setmetatable({}, Skeleton)
-    
+
     self.data = skeletonData
     self.bones = {}
     self.slots = {}
@@ -350,7 +350,7 @@ function Skeleton.new(skeletonData)
     self.transformConstraints = {}
     self.pathConstraints = {}
     self.physicsConstraints = {}
-    
+
     self.skin = nil
     self.x = 0
     self.y = 0
@@ -363,7 +363,7 @@ function Skeleton.new(skeletonData)
     self.time = 0
     self.flipX = false
     self.flipY = false
-    
+
     for i, boneData in ipairs(skeletonData.bones) do
         local parent = nil
         if boneData.parent then
@@ -375,7 +375,7 @@ function Skeleton.new(skeletonData)
         local bone = Bone.new(boneData, parent, self)
         table.insert(self.bones, bone)
     end
-    
+
     for i, slotData in ipairs(skeletonData.slots) do
         local boneIndex = skeletonData:findBoneIndex(slotData.boneData.name)
         local bone = self.bones[boneIndex]
@@ -383,21 +383,21 @@ function Skeleton.new(skeletonData)
         table.insert(self.slots, slot)
         table.insert(self.drawOrder, slot)
     end
-    
+
     self.constraints = {} -- Initialize constraints list
-    
+
     for i, ikConstraintData in ipairs(skeletonData.ikConstraints) do
         local ikConstraint = constraintModule.IkConstraint.new(ikConstraintData, self)
         table.insert(self.ikConstraints, ikConstraint)
         table.insert(self.constraints, ikConstraint)
     end
-    
+
     for i, transformConstraintData in ipairs(skeletonData.transformConstraints) do
         local transformConstraint = constraintModule.TransformConstraint.new(transformConstraintData, self)
         table.insert(self.transformConstraints, transformConstraint)
         table.insert(self.constraints, transformConstraint)
     end
-    
+
     for i, pathConstraintData in ipairs(skeletonData.pathConstraints) do
         local pathConstraint = constraintModule.PathConstraint.new(pathConstraintData, self)
         table.insert(self.pathConstraints, pathConstraint)
@@ -409,12 +409,12 @@ function Skeleton.new(skeletonData)
         table.insert(self.physicsConstraints, physicsConstraint)
         table.insert(self.constraints, physicsConstraint)
     end
-    
+
     -- Sort constraints by order
     table.sort(self.constraints, function(a, b)
         return a.data.order < b.data.order
     end)
-    
+
     self:updateCache()
     return self
 end
@@ -505,7 +505,7 @@ function Skeleton:updateWorldTransform()
             bone:updateWorldTransform()
         end
     end
-    
+
     -- 2. Apply active Constraints (IK, Transform, Path, Physics) in order
     for _, constraint in ipairs(self.constraints) do
         if constraint.active ~= false then
@@ -566,7 +566,7 @@ function Skeleton:setSlotsToSetupPose()
         slot:setToSetupPose()
         self.drawOrder[i] = slot
     end
-    
+
     -- Apply skin attachments (including default skin fallback)
     for i, slot in ipairs(self.slots) do
         local attachmentName = slot.data.attachmentName
@@ -662,24 +662,24 @@ end
 function Skeleton:getAttachment(slotName, attachmentName)
     local slotIndex = self:findSlotIndex(slotName)
     if slotIndex == -1 then return nil end
-    
+
     local attachment = nil
     local skin = self.skin
     if skin then
         attachment = skin:getAttachment(slotIndex, attachmentName)
     end
-    
+
     if not attachment and self.data.defaultSkin then
         attachment = self.data.defaultSkin:getAttachment(slotIndex, attachmentName)
     end
-    
+
     return attachment
 end
 
 function Skeleton:setAttachment(slotName, attachmentName)
     local slot = self:findSlot(slotName)
     if not slot then return end
-    
+
     local attachment = nil
     if attachmentName then
         attachment = self:getAttachment(slotName, attachmentName)
@@ -687,7 +687,7 @@ function Skeleton:setAttachment(slotName, attachmentName)
             error("Attachment not found: " .. attachmentName .. ", slot: " .. slotName)
         end
     end
-    
+
     slot:setAttachment(attachment)
 end
 

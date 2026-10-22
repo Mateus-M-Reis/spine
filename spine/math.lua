@@ -165,7 +165,7 @@ end
 
 function Transform:applyToVector(x, y)
   self:update()
-  return 
+  return
     x * self.a + y * self.b + self.x,
     x * self.c + y * self.d + self.y
 end
@@ -295,19 +295,19 @@ end
 function math_module.binarySearch(frames, value, step)
     local low = 1
     local high = #frames - step + 1 -- Start of last frame
-    
+
     while low <= high do
         local mid = math.floor((low + high) / 2)
         -- Align to step
         mid = math.floor((mid - 1) / step) * step + 1
-        
+
         if frames[mid] <= value then
             low = mid + step
         else
             high = mid - step
         end
     end
-    
+
     return high
 end
 
@@ -342,7 +342,7 @@ function math_module.bezier(t, p0, p1, p2, p3)
   local uu = u * u
   local uuu = uu * u
   local ttt = tt * t
-  
+
   if p3 then
     -- 三次贝塞尔
     return uuu * p0 + 3 * uu * t * p1 + 3 * u * tt * p2 + ttt * p3
@@ -362,11 +362,11 @@ function math_module.curve(t, cx1, cy1, cx2, cy2)
   local uu = u * u
   local uuu = uu * u
   local ttt = tt * t
-  
+
   -- 三次贝塞尔曲线
   local x = uuu * 0 + 3 * uu * t * cx1 + 3 * u * tt * cx2 + ttt * 1
   local y = uuu * 0 + 3 * uu * t * cy1 + 3 * u * tt * cy2 + ttt * 1
-  
+
   return x, y
 end
 
@@ -374,24 +374,24 @@ end
 function math_module.init()
   -- 设置随机数种子
   math.randomseed(os.time())
-  
+
   -- 扩展数学函数
   local originalMath = math
-  
+
   -- 度转弧度
   if not originalMath.rad then
     originalMath.rad = function(deg)
       return deg * math.pi / 180
     end
   end
-  
+
   -- 弧度转度
   if not originalMath.deg then
     originalMath.deg = function(rad)
       return rad * 180 / math.pi
     end
   end
-  
+
   print("Spine Math module initialized")
 end
 
@@ -442,17 +442,17 @@ function Matrix:rotate(angle)
   local cos = math.cos(angle)
   local sin = math.sin(angle)
   local m = self.m
-  
+
   local a = m[1][1]
   local b = m[1][2]
   local c = m[2][1]
   local d = m[2][2]
-  
+
   m[1][1] = a * cos + b * sin
   m[1][2] = b * cos - a * sin
   m[2][1] = c * cos + d * sin
   m[2][2] = d * cos - c * sin
-  
+
   return self
 end
 
@@ -468,7 +468,7 @@ end
 function Matrix:multiply(other)
   local result = Matrix.new()
   local a, b, c = self.m, other.m, result.m
-  
+
   for i = 1, 3 do
     for j = 1, 3 do
       c[i][j] = 0
@@ -477,14 +477,14 @@ function Matrix:multiply(other)
       end
     end
   end
-  
+
   self.m = c
   return self
 end
 
 function Matrix:apply(x, y)
   local m = self.m
-  return 
+  return
     x * m[1][1] + y * m[1][2] + m[3][1],
     x * m[2][1] + y * m[2][2] + m[3][2]
 end
