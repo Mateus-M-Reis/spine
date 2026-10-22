@@ -121,7 +121,30 @@ function generateIK() {
   writeOutput("ik_expected.json", output);
 }
 
+function generateConstraintTimeline() {
+  const input = readInput("constraint_input.json");
+  const skeletonData = new spine.SkeletonJson(loader).readSkeletonData(input);
+  const skeleton = new spine.Skeleton(skeletonData);
+  skeleton.setToSetupPose();
+  const state = new spine.AnimationState(new spine.AnimationStateData(skeletonData));
+  state.setAnimation(0, "mix", false);
+
+  const output = { times: [], bones: {} };
+  let previousTime = 0;
+  for (const time of [0, 0.25, 0.5, 0.75, 1]) {
+    state.update(time - previousTime);
+    state.apply(skeleton);
+    skeleton.updateWorldTransform(spine.Physics.update);
+    previousTime = time;
+    output.times.push(time);
+    output.bones[time] = boneMatrices(skeleton);
+  }
+
+  writeOutput("constraint_expected.json", output);
+}
+
 generatePose();
 generateTimelines();
 generateIK();
-console.log("wrote pose, timeline, and IK reference fixtures");
+generateConstraintTimeline();
+console.log("wrote pose, timeline, IK, and transform-constraint reference fixtures");
