@@ -822,8 +822,8 @@ function PathConstraint:apply()
                 cos_r = math_cos(r)
                 sin_r = math_sin(r)
                 local length = bone.data.length
-                bone.worldX = bone.worldX + (length * (cos_r * a - sin_r * c) - dx) * mixRotate
-                bone.worldY = bone.worldY + (length * (sin_r * a + cos_r * c) - dy) * mixRotate
+                boneX = boneX + (length * (cos_r * a - sin_r * c) - dx) * mixRotate
+                boneY = boneY + (length * (sin_r * a + cos_r * c) - dy) * mixRotate
             else
                 r = r + offsetRotation
             end

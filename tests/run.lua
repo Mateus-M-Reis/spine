@@ -952,71 +952,86 @@ end
 section("reference constraints: path")
 
 do
-  local input = lovr.filesystem.read("tests/fixtures/reference/path_input.json")
-  local expectedText = lovr.filesystem.read("tests/fixtures/reference/path_expected.json")
-  check(input ~= nil and expectedText ~= nil, "path reference fixtures readable")
+  local variants = {
+    "path",
+    "path_multi",
+    "path_closed",
+    "path_chain",
+    "path_chain_scale",
+    "path_spacing_percent",
+    "path_spacing_proportional",
+  }
 
-  local data = spine.utils.jsonDecode(input)
-  local expected = spine.utils.jsonDecode(expectedText)
-  check(data ~= nil and expected ~= nil, "path reference fixtures parse")
+  for _, name in ipairs(variants) do
+    local input = lovr.filesystem.read("tests/fixtures/reference/" .. name .. "_input.json")
+    local expectedText = lovr.filesystem.read("tests/fixtures/reference/" .. name .. "_expected.json")
+    check(input ~= nil and expectedText ~= nil, name .. " fixtures readable")
 
-  local inst = spine.loadSkeleton(data)
-  inst.skeleton:updateWorldTransform()
-  local mismatch = nil
-  for _, bone in ipairs(inst.skeleton.bones) do
-    local reference = expected[bone.data.name]
-    local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
-    for i = 1, 6 do
-      if not approx(actual[i], reference[i], 1e-4) then
-        mismatch = string.format("path %s[%d]: %.6f ~= %.6f",
-          bone.data.name, i, actual[i], reference[i])
-        break
+    local data = spine.utils.jsonDecode(input)
+    local expected = spine.utils.jsonDecode(expectedText)
+    check(data ~= nil and expected ~= nil, name .. " fixtures parse")
+
+    local inst = spine.loadSkeleton(data)
+    inst.skeleton:updateWorldTransform()
+    local mismatch = nil
+    for _, bone in ipairs(inst.skeleton.bones) do
+      local reference = expected[bone.data.name]
+      local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+      for i = 1, 6 do
+        if not approx(actual[i], reference[i], 1e-4) then
+          mismatch = string.format("%s %s[%d]: %.6f ~= %.6f",
+            name, bone.data.name, i, actual[i], reference[i])
+          break
+        end
       end
+      if mismatch then break end
     end
-    if mismatch then break end
+    check(mismatch == nil, mismatch or (name .. " reference pose matches"))
+    spine.release(inst)
   end
-  check(mismatch == nil, mismatch or "path reference pose matches")
-  spine.release(inst)
 end
 
 ---------------------------------------------------------------------------
 section("reference constraints: physics")
 
 do
-  local input = lovr.filesystem.read("tests/fixtures/reference/physics_input.json")
-  local expectedText = lovr.filesystem.read("tests/fixtures/reference/physics_expected.json")
-  check(input ~= nil and expectedText ~= nil, "physics reference fixtures readable")
+  local variants = { "physics", "physics_rotate", "physics_scale", "physics_shear" }
+  for _, name in ipairs(variants) do
+    local input = lovr.filesystem.read("tests/fixtures/reference/" .. name .. "_input.json")
+    local expectedText = lovr.filesystem.read("tests/fixtures/reference/" .. name .. "_expected.json")
+    check(input ~= nil and expectedText ~= nil, name .. " fixtures readable")
 
-  local data = spine.utils.jsonDecode(input)
-  local expected = spine.utils.jsonDecode(expectedText)
-  check(data ~= nil and expected ~= nil, "physics reference fixtures parse")
+    local data = spine.utils.jsonDecode(input)
+    local expected = spine.utils.jsonDecode(expectedText)
+    check(data ~= nil and expected ~= nil, name .. " fixtures parse")
 
-  local inst = spine.loadSkeleton(data)
-  local state = inst.animationState
-  state:setAnimation(0, "move", true)
-  local dt = 1 / 30
-  for _ = 1, 30 do
-    state:update(dt)
-    state:apply(inst.skeleton)
-    inst.skeleton:update(dt)
-    inst.skeleton:updateWorldTransform()
-  end
-
-  local mismatch = nil
-  for _, bone in ipairs(inst.skeleton.bones) do
-    local reference = expected[bone.data.name]
-    local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
-    for i = 1, 6 do
-      if not approx(actual[i], reference[i], 1e-4) then
-        mismatch = string.format("physics %s[%d]: %.6f ~= %.6f",
-          bone.data.name, i, actual[i], reference[i])
-        break
-      end
+    local inst = spine.loadSkeleton(data)
+    local state = inst.animationState
+    state:setAnimation(0, "move", true)
+    local dt = 1 / 30
+    for _ = 1, 30 do
+      state:update(dt)
+      state:apply(inst.skeleton)
+      inst.skeleton:update(dt)
+      inst.skeleton:updateWorldTransform()
     end
-    if mismatch then break end
+
+    local mismatch = nil
+    for _, bone in ipairs(inst.skeleton.bones) do
+      local reference = expected[bone.data.name]
+      local actual = { bone.worldX, bone.worldY, bone.a, bone.b, bone.c, bone.d }
+      for i = 1, 6 do
+        if not approx(actual[i], reference[i], 1e-4) then
+          mismatch = string.format("%s %s[%d]: %.6f ~= %.6f",
+            name, bone.data.name, i, actual[i], reference[i])
+          break
+        end
+      end
+      if mismatch then break end
+    end
+    check(mismatch == nil, mismatch or (name .. " reference pose matches"))
+    spine.release(inst)
   end
-  check(mismatch == nil, mismatch or "physics reference pose matches")
-  spine.release(inst)
 end
 
 ---------------------------------------------------------------------------

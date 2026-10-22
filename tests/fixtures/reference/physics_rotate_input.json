@@ -1,0 +1,54 @@
+{
+  "skeleton": {
+    "spine": "4.2.00",
+    "width": 200,
+    "height": 200
+  },
+  "bones": [
+    {
+      "name": "root"
+    },
+    {
+      "name": "particle",
+      "parent": "root",
+      "x": 0,
+      "y": 0,
+      "length": 20
+    }
+  ],
+  "slots": [],
+  "skins": {},
+  "physics": [
+    {
+      "name": "p",
+      "bone": "particle",
+      "rotate": 1,
+      "limit": 10,
+      "inertia": 0.5,
+      "damping": 0.1,
+      "gravity": 0,
+      "wind": 0,
+      "mass": 1,
+      "strength": 1,
+      "mix": 1
+    }
+  ],
+  "animations": {
+    "move": {
+      "bones": {
+        "root": {
+          "rotate": [
+            {
+              "time": 0,
+              "value": 0
+            },
+            {
+              "time": 1,
+              "value": 90
+            }
+          ]
+        }
+      }
+    }
+  }
+}

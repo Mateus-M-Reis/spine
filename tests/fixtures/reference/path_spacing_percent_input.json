@@ -1,0 +1,93 @@
+{
+  "skeleton": {
+    "spine": "4.2.00",
+    "width": 300,
+    "height": 300
+  },
+  "bones": [
+    {
+      "name": "root"
+    },
+    {
+      "name": "path-bone",
+      "parent": "root"
+    },
+    {
+      "name": "bone1",
+      "parent": "root",
+      "length": 20
+    },
+    {
+      "name": "bone2",
+      "parent": "bone1",
+      "x": 20,
+      "length": 20
+    }
+  ],
+  "slots": [
+    {
+      "name": "path-slot",
+      "bone": "path-bone",
+      "attachment": "path"
+    }
+  ],
+  "skins": [
+    {
+      "name": "default",
+      "attachments": {
+        "path-slot": {
+          "path": {
+            "type": "path",
+            "closed": false,
+            "constantSpeed": true,
+            "lengths": [
+              33,
+              33,
+              34
+            ],
+            "vertices": [
+              0,
+              0,
+              3,
+              15,
+              8,
+              25,
+              12,
+              30,
+              22,
+              38,
+              32,
+              40,
+              42,
+              40,
+              52,
+              35,
+              60,
+              25
+            ],
+            "vertexCount": 9
+          }
+        }
+      }
+    }
+  ],
+  "path": [
+    {
+      "name": "follow",
+      "bones": [
+        "bone1",
+        "bone2"
+      ],
+      "target": "path-slot",
+      "positionMode": "percent",
+      "spacingMode": "percent",
+      "rotateMode": "tangent",
+      "position": 0.3,
+      "spacing": 0.1,
+      "mixRotate": 1,
+      "mixX": 1,
+      "mixY": 1
+    }
+  ],
+  "animations": {}
+}
