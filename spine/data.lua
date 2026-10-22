@@ -1266,37 +1266,38 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
         end
       end
       transformData.target = self:findBone(transformJson.target)
+      transformData.local_ = transformJson["local"] or false
+      transformData.relative = transformJson.relative or false
       transformData.offsetX = (transformJson.x or 0) * self.scale
       transformData.offsetY = (transformJson.y or 0) * self.scale
       transformData.offsetRotation = transformJson.rotation or 0
       transformData.offsetScaleX = transformJson.scaleX or 0
       transformData.offsetScaleY = transformJson.scaleY or 0
       transformData.offsetShearY = transformJson.shearY or 0
+
       transformData.mixRotate = (transformJson.mixRotate ~= nil) and transformJson.mixRotate or 1
-      local hasMixX = transformJson.mixX ~= nil
-      local hasMixY = transformJson.mixY ~= nil
-      local translateMix = transformJson.translateMix
-      if hasMixX or hasMixY then
-        transformData.mixX = hasMixX and transformJson.mixX or 0
-        transformData.mixY = hasMixY and transformJson.mixY or 0
-      elseif translateMix ~= nil then
-        transformData.mixX = translateMix
-        transformData.mixY = translateMix
-      else
-        transformData.mixX = 1
-        transformData.mixY = 1
-      end
-      -- Scale/shear mixes: support unified keys if present; otherwise keep disabled by default
+      local mixX = transformJson.mixX
+      if mixX == nil then mixX = transformJson.translateMix end
+      if mixX == nil then mixX = 1 end
+      local mixY = transformJson.mixY
+      if mixY == nil then mixY = transformJson.translateMix end
+      if mixY == nil then mixY = mixX end
+      transformData.mixX = mixX
+      transformData.mixY = mixY
+
       local scaleMix = transformJson.scaleMix
-      if scaleMix ~= nil then
-        transformData.mixScaleX = scaleMix
-        transformData.mixScaleY = scaleMix
-      else
-        transformData.mixScaleX = (transformJson.mixScaleX ~= nil) and transformJson.mixScaleX or 0
-        transformData.mixScaleY = (transformJson.mixScaleY ~= nil) and transformJson.mixScaleY or 0
-      end
+      local mixScaleX = transformJson.mixScaleX
+      if mixScaleX == nil then mixScaleX = scaleMix end
+      if mixScaleX == nil then mixScaleX = 1 end
+      local mixScaleY = transformJson.mixScaleY
+      if mixScaleY == nil then mixScaleY = scaleMix end
+      if mixScaleY == nil then mixScaleY = mixScaleX end
+      transformData.mixScaleX = mixScaleX
+      transformData.mixScaleY = mixScaleY
+
       local shearMix = transformJson.shearMix
-      transformData.mixShearY = (shearMix ~= nil) and shearMix or ((transformJson.mixShearY ~= nil) and transformJson.mixShearY or 0)
+      transformData.mixShearY = (transformJson.mixShearY ~= nil) and transformJson.mixShearY
+        or ((shearMix ~= nil) and shearMix or 1)
       table.insert(self.transformConstraints, transformData)
     end
   end

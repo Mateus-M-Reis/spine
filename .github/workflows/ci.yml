@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_lovr_smoke:
+        description: Run the real-LÖVR smoke test (requires a display/GPU-capable runner)
+        type: boolean
+        default: false
+
+jobs:
+  tests:
+    name: LuaJIT and Lua 5.4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit lua5.4
+
+      - name: Runtime suite (LuaJIT)
+        run: luajit tests/run.lua
+
+      - name: Runtime suite (Lua 5.4)
+        run: lua5.4 tests/run.lua
+
+      - name: Examples smoke
+        run: luajit tests/run_examples.lua
+
+  benchmark:
+    name: Performance budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Luajit
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit
+
+      - name: Run benchmark guard
+        run: luajit tests/benchmark.lua
+
+  lovr-smoke:
+    name: Real LÖVR smoke (opt-in, best-effort)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_lovr_smoke
+    # Hosted runners often lack DRI3/GPU presentation. Prefer a desktop or
+    # self-hosted runner with a working Vulkan display; this job stays
+    # non-blocking so the headless gates remain authoritative.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install display and software Vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb mesa-vulkan-drivers
+
+      - name: Download LÖVR 0.18
+        run: |
+          curl -L -o lovr.AppImage \
+            https://github.com/bjornbytes/lovr/releases/download/v0.18.0/lovr-v0.18.0-x86_64.AppImage
+          chmod +x lovr.AppImage
+
+      - name: Select software Vulkan driver
+        run: |
+          ICD=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
+          echo "VK_ICD_FILENAMES=$ICD" >> "$GITHUB_ENV"
+          echo "Using $ICD"
+
+      - name: Run smoke project
+        env:
+          LOVR_BIN: ${{ github.workspace }}/lovr.AppImage
+        run: tests/run_lovr_smoke.sh

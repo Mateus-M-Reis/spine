@@ -18,6 +18,17 @@ function Bone.new(boneData, parent, skeleton)
     self.scaleY = boneData.scaleY
     self.shearX = boneData.shearX
     self.shearY = boneData.shearY
+
+    -- Applied values: the animation-local pose is x/y/rotation/..., while
+    -- ax/ay/arotation/... hold the values actually used for this frame's
+    -- world matrix after constraints.
+    self.ax = self.x
+    self.ay = self.y
+    self.arotation = self.rotation
+    self.ascaleX = self.scaleX
+    self.ascaleY = self.scaleY
+    self.ashearX = self.shearX
+    self.ashearY = self.shearY
     
     self.worldX = 0
     self.worldY = 0
@@ -47,7 +58,87 @@ function Bone:updateWorldTransformWithChildren()
     end
 end
 
-function Bone:updateWorldTransform()
+-- Updates descendants after a constraint has modified this bone's world
+-- matrix directly, without recomputing this bone from its local fields.
+function Bone:updateChildrenWorldTransform()
+    for _, child in ipairs(self.children) do
+        child:updateWorldTransform()
+    end
+end
+
+-- Rebuilds the local/applied transform from the current world matrix, so
+-- constraints that run later in the same frame see consistent local values.
+function Bone:updateAppliedTransform()
+    local parent = self.parent
+    local skeleton = self.skeleton
+
+    if not parent then
+        local scaleX = skeleton.scaleX or 1
+        local scaleY = skeleton.scaleY or 1
+        if scaleX == 0 then scaleX = 1 end
+        if scaleY == 0 then scaleY = 1 end
+
+        self.x = (self.worldX - (skeleton.x or 0)) / scaleX
+        self.y = (self.worldY - (skeleton.y or 0)) / scaleY
+        self.rotation = math.deg(math.atan2(self.c, self.a))
+        self.scaleX = math.sqrt(self.a * self.a + self.c * self.c) / math.abs(scaleX)
+        self.scaleY = math.sqrt(self.b * self.b + self.d * self.d) / math.abs(scaleY)
+        self.shearX = 0
+        self.shearY = math.deg(math.atan2(
+            self.a * self.b + self.c * self.d,
+            self.a * self.d - self.b * self.c))
+        self.ax, self.ay = self.x, self.y
+        self.arotation = self.rotation
+        self.ascaleX, self.ascaleY = self.scaleX, self.scaleY
+        self.ashearX, self.ashearY = self.shearX, self.shearY
+        return
+    end
+
+    local pa, pb, pc, pd = parent.a, parent.b, parent.c, parent.d
+    local det = pa * pd - pb * pc
+    if math.abs(det) < 1e-9 then return end
+    local invDet = 1 / det
+
+    local dx = self.worldX - parent.worldX
+    local dy = self.worldY - parent.worldY
+    self.x = (dx * pd - dy * pb) * invDet
+    self.y = (dy * pa - dx * pc) * invDet
+
+    local mode = self.data.transformMode
+    if mode == "normal" then
+        local ra = (pd * self.a - pb * self.c) * invDet
+        local rb = (pd * self.b - pb * self.d) * invDet
+        local rc = (-pc * self.a + pa * self.c) * invDet
+        local rd = (-pc * self.b + pa * self.d) * invDet
+
+        local sx = math.sqrt(ra * ra + rc * rc)
+        local determinant = ra * rd - rb * rc
+        self.rotation = math.deg(math.atan2(rc, ra))
+        self.scaleX = sx
+        self.scaleY = sx ~= 0 and (determinant / sx) or math.sqrt(rb * rb + rd * rd)
+        self.shearX = 0
+        self.shearY = -math.deg(math.atan2(ra * rb + rc * rd, determinant))
+    end
+
+    self.ax, self.ay = self.x, self.y
+    self.arotation = self.rotation
+    self.ascaleX, self.ascaleY = self.scaleX, self.scaleY
+    self.ashearX, self.ashearY = self.shearX, self.shearY
+end
+
+function Bone:updateWorldTransform(x, y, rotation, scaleX, scaleY, shearX, shearY)
+    if x ~= nil then
+        self.x, self.y = x, y
+        self.rotation = rotation
+        self.scaleX, self.scaleY = scaleX, scaleY
+        self.shearX, self.shearY = shearX or 0, shearY or 0
+    end
+
+    self.ax, self.ay = self.x, self.y
+    self.arotation = self.rotation
+    self.ascaleX, self.ascaleY = self.scaleX, self.scaleY
+    self.ashearX, self.ashearY = self.shearX, self.shearY
+
     local parent = self.parent
     
     -- 1. Compute Local Matrix (la, lb, lc, ld)
@@ -389,6 +480,25 @@ function Skeleton:updateCache()
 end
 
 function Skeleton:updateWorldTransform()
+    -- Constraints may adjust local/applied bone values to build this frame's
+    -- matrices. Keep the animation pose separate so relative/local constraints
+    -- do not accumulate frame over frame.
+    local snapshot = self._localSnapshot
+    if not snapshot then
+        snapshot = {}
+        self._localSnapshot = snapshot
+    end
+    for i, bone in ipairs(self.bones) do
+        local o = (i - 1) * 7
+        snapshot[o + 1] = bone.x
+        snapshot[o + 2] = bone.y
+        snapshot[o + 3] = bone.rotation
+        snapshot[o + 4] = bone.scaleX
+        snapshot[o + 5] = bone.scaleY
+        snapshot[o + 6] = bone.shearX
+        snapshot[o + 7] = bone.shearY
+    end
+
     -- 1. Update root bones (which recursively updates their children)
     for _, bone in ipairs(self.bones) do
         if not bone.parent then
@@ -423,6 +533,18 @@ function Skeleton:updateWorldTransform()
                 end
             end
         end
+    end
+
+    -- Restore the animation-local pose. World matrices remain as constrained.
+    for i, bone in ipairs(self.bones) do
+        local o = (i - 1) * 7
+        bone.x = snapshot[o + 1]
+        bone.y = snapshot[o + 2]
+        bone.rotation = snapshot[o + 3]
+        bone.scaleX = snapshot[o + 4]
+        bone.scaleY = snapshot[o + 5]
+        bone.shearX = snapshot[o + 6]
+        bone.shearY = snapshot[o + 7]
     end
 end
 
