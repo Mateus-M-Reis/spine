@@ -164,6 +164,9 @@ function Renderer:drawDrawOrderRange(skeleton, pass, drawOrder, startIndex, endI
 	while i <= endIndex do
 		local slot = drawOrder[i]
 		local attachment = slot.attachment
+		if slot.bone and slot.bone.active == false then
+			attachment = nil
+		end
 
 		if attachment and attachment.type == "clipping" and self.hasStencil ~= false then
 			-- Everything collected before the clip must be drawn before the

@@ -337,27 +337,80 @@ function MeshAttachment:updateRegion()
     for i = 1, #regionUVs do uvs[i] = 0 end
   end
 
-  local u = region.u
-  local v = region.v
-  local width = region.u2 - region.u
-  local height = region.v2 - region.v
+  local texWidth = region.textureWidth or (region.page and region.page.width) or 0
+  local texHeight = region.textureHeight or (region.page and region.page.height) or 0
+  if texWidth <= 0 or texHeight <= 0 then
+    -- No texture dimensions available (e.g. a hand-built region); fall back
+    -- to the packed region bounds.
+    texWidth = 0
+    texHeight = 0
+  end
 
-  if region.rotate then
-    for i = 1, #regionUVs, 2 do
-      local textureX = regionUVs[i]
-      local textureY = regionUVs[i+1]
-      -- 90 degrees CW rotation
-      -- u = v (from bottom)
-      -- v = u (from left)
-      uvs[i] = u + textureY * width
-      uvs[i + 1] = v + height - textureX * height
+  local offsetX = region.offsetX or 0
+  local offsetY = region.offsetY or 0
+  local u, v, width, height
+
+  if texWidth > 0 and texHeight > 0 then
+    -- regionUVs are normalized to the original (untrimmed) image, so trim
+    -- offsets and original dimensions participate here. This mirrors the
+    -- Spine 4.2 MeshAttachment.updateRegion formulas.
+    local originalWidth = region.originalWidth or 0
+    local originalHeight = region.originalHeight or 0
+
+    if region.rotate then
+      local trimmedWidth = region.height      -- unrotated packed width
+      local trimmedHeight = region.width      -- unrotated packed height
+      if originalWidth == 0 then originalWidth = trimmedWidth end
+      if originalHeight == 0 then originalHeight = trimmedHeight end
+
+      u = region.u - (originalHeight - offsetY - trimmedHeight) / texWidth
+      v = region.v - (originalWidth - offsetX - trimmedWidth) / texHeight
+      width = originalHeight / texWidth
+      height = originalWidth / texHeight
+
+      for i = 1, #regionUVs, 2 do
+        local textureX = regionUVs[i]
+        local textureY = regionUVs[i+1]
+        uvs[i] = u + textureY * width
+        uvs[i + 1] = v + (1 - textureX) * height
+      end
+    else
+      local trimmedWidth = region.width
+      local trimmedHeight = region.height
+      if originalWidth == 0 then originalWidth = trimmedWidth end
+      if originalHeight == 0 then originalHeight = trimmedHeight end
+
+      u = region.u - offsetX / texWidth
+      v = region.v - (originalHeight - offsetY - trimmedHeight) / texHeight
+      width = originalWidth / texWidth
+      height = originalHeight / texHeight
+
+      for i = 1, #regionUVs, 2 do
+        local textureX = regionUVs[i]
+        local textureY = regionUVs[i+1]
+        uvs[i] = u + textureX * width
+        uvs[i + 1] = v + textureY * height
+      end
     end
   else
-    for i = 1, #regionUVs, 2 do
-      local textureX = regionUVs[i]
-      local textureY = regionUVs[i+1]
-      uvs[i] = u + textureX * width
-      uvs[i + 1] = v + textureY * height
+    -- Packed-bounds fallback for manually constructed regions.
+    local u0, v0 = region.u, region.v
+    local w = region.u2 - region.u
+    local h = region.v2 - region.v
+    if region.rotate then
+      for i = 1, #regionUVs, 2 do
+        local textureX = regionUVs[i]
+        local textureY = regionUVs[i+1]
+        uvs[i] = u0 + textureY * w
+        uvs[i + 1] = v0 + (1 - textureX) * h
+      end
+    else
+      for i = 1, #regionUVs, 2 do
+        local textureX = regionUVs[i]
+        local textureY = regionUVs[i+1]
+        uvs[i] = u0 + textureX * w
+        uvs[i + 1] = v0 + textureY * h
+      end
     end
   end
 end
@@ -881,6 +934,7 @@ function IkConstraintData.new(name)
   local self = setmetatable(BaseData.new(), IkConstraintData)
   self.name = name
   self.order = 0
+  self.skinRequired = false
   self.bones = {}
   self.target = nil
   self.mix = 1
@@ -898,6 +952,7 @@ function TransformConstraintData.new(name)
   local self = setmetatable(BaseData.new(), TransformConstraintData)
   self.name = name
   self.order = 0
+  self.skinRequired = false
   self.bones = {}
   self.target = nil
   self.local_ = false
@@ -922,6 +977,7 @@ function PathConstraintData.new(name)
   local self = setmetatable(BaseData.new(), PathConstraintData)
   self.name = name
   self.order = 0
+  self.skinRequired = false
   self.bones = {}
   self.target = nil
   self.positionMode = "percent"
@@ -942,6 +998,7 @@ function PhysicsConstraintData.new(name)
   local self = setmetatable(BaseData.new(), PhysicsConstraintData)
   self.name = name
   self.order = 0
+  self.skinRequired = false
   self.bone = nil
   self.target = nil
   self.rotateMix = 0
@@ -955,6 +1012,13 @@ function PhysicsConstraintData.new(name)
   self.wind = 0
   self.gravity = 0
   self.mix = 1
+  self.inertiaGlobal = false
+  self.strengthGlobal = false
+  self.dampingGlobal = false
+  self.massGlobal = false
+  self.windGlobal = false
+  self.gravityGlobal = false
+  self.mixGlobal = false
   self._x = 0
   self._y = 0
   self._rotate = 0
@@ -1095,6 +1159,30 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
                 end
             end
 
+            -- Bones and constraints enabled by this skin. Constraint data is
+            -- resolved after the constraint blocks are parsed below.
+            if skinMap.bones then
+                for _, boneName in ipairs(skinMap.bones) do
+                    local boneData = self:findBone(boneName)
+                    if not boneData then
+                        error("Skin bone not found: " .. tostring(boneName))
+                    end
+                    table.insert(skin.bones, boneData)
+                end
+            end
+
+            skin._constraintNames = {}
+            for _, constraintType in ipairs({ "ik", "transform", "path", "physics" }) do
+                if skinMap[constraintType] then
+                    for _, constraintName in ipairs(skinMap[constraintType]) do
+                        table.insert(skin._constraintNames, {
+                            type = constraintType,
+                            name = constraintName,
+                        })
+                    end
+                end
+            end
+
             self.skins[skinName] = skin
             if skinName == "default" then
                 self.defaultSkin = skin
@@ -1146,6 +1234,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
     for _, ikJson in ipairs(json.ik) do
       local ikData = IkConstraintData.new(ikJson.name)
       ikData.order = ikJson.order or 0
+      ikData.skinRequired = ikJson.skin or false
       ikData.bones = {}
       for _, boneName in ipairs(ikJson.bones) do
         local boneData = self:findBone(boneName)
@@ -1168,6 +1257,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
     for _, transformJson in ipairs(json.transform) do
       local transformData = TransformConstraintData.new(transformJson.name)
       transformData.order = transformJson.order or 0
+      transformData.skinRequired = transformJson.skin or false
       transformData.bones = {}
       for _, boneName in ipairs(transformJson.bones) do
         local boneData = self:findBone(boneName)
@@ -1216,6 +1306,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
     for _, pathJson in ipairs(json.path) do
       local pathData = PathConstraintData.new(pathJson.name)
       pathData.order = pathJson.order or 0
+      pathData.skinRequired = pathJson.skin or false
       pathData.bones = {}
       for _, boneName in ipairs(pathJson.bones) do
         local boneData = self:findBone(boneName)
@@ -1242,6 +1333,7 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
     for _, physicsJson in ipairs(json.physics) do
       local physicsData = PhysicsConstraintData.new(physicsJson.name)
       physicsData.order = physicsJson.order or 0
+      physicsData.skinRequired = physicsJson.skin or false
       physicsData.bone = self:findBone(physicsJson.bone)
       
       -- Channel strengths are multipliers, not lengths; only the limit is
@@ -1264,8 +1356,44 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
       physicsData.wind = physicsJson.wind or 0
       physicsData.gravity = physicsJson.gravity or 0
       physicsData.mix = (physicsJson.mix ~= nil) and physicsJson.mix or 1
+      physicsData.inertiaGlobal = physicsJson.inertiaGlobal or false
+      physicsData.strengthGlobal = physicsJson.strengthGlobal or false
+      physicsData.dampingGlobal = physicsJson.dampingGlobal or false
+      physicsData.massGlobal = physicsJson.massGlobal or false
+      physicsData.windGlobal = physicsJson.windGlobal or false
+      physicsData.gravityGlobal = physicsJson.gravityGlobal or false
+      physicsData.mixGlobal = physicsJson.mixGlobal or false
       
       table.insert(self.physicsConstraints, physicsData)
+    end
+  end
+
+  -- Resolve skin constraint names now that every constraint list is loaded.
+  for _, skin in pairs(self.skins) do
+    if skin._constraintNames then
+      for _, entry in ipairs(skin._constraintNames) do
+        local list
+        if entry.type == "ik" then list = self.ikConstraints
+        elseif entry.type == "transform" then list = self.transformConstraints
+        elseif entry.type == "path" then list = self.pathConstraints
+        elseif entry.type == "physics" then list = self.physicsConstraints
+        end
+
+        local found
+        for _, constraint in ipairs(list or {}) do
+          if constraint.name == entry.name then
+            found = constraint
+            break
+          end
+        end
+
+        if not found then
+          error(string.format("Skin %s constraint not found: %s",
+            tostring(skin.name), tostring(entry.name)))
+        end
+        table.insert(skin.constraints, found)
+      end
+      skin._constraintNames = nil
     end
   end
 
@@ -1948,7 +2076,9 @@ function SkeletonData:loadFromJson(json, attachmentLoader)
             end
           end
 
-          if constraintIndex ~= -1 then
+          -- An empty constraint name is a global timeline (index -1); it
+          -- applies to constraints that opt in via their *Global flag.
+          if constraintIndex ~= -1 or constraintName == "" then
             for typeName, timelineData in pairs(timelineMap) do
                 local timelineType = nil
                 if typeName == "inertia" then timelineType = animationModule.PhysicsConstraintTimeline.INERTIA

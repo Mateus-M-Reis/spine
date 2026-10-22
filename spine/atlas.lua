@@ -33,6 +33,8 @@ function AtlasRegion:setTexture(texture)
 	self._textureKey = texture and tostring(texture) or nil
 	if texture then
 		local texWidth, texHeight = texture:getDimensions()
+		self.textureWidth = texWidth
+		self.textureHeight = texHeight
 		self.u = self.x / texWidth
 		self.v = self.y / texHeight
 		self.u2 = (self.x + self.width) / texWidth
